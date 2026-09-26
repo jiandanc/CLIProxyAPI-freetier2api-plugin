@@ -30,7 +30,7 @@ import (
 var pluginVersion = defaultPluginVersion
 
 // defaultPluginVersion 是未注入时的版本号。
-const defaultPluginVersion = "0.0.1"
+const defaultPluginVersion = "0.0.2"
 
 // effectivePluginVersion 返回对外上报的版本号。
 //
@@ -117,6 +117,8 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 		stopBackgroundWork()
 		return okEnvelope(struct{}{})
 
+	case pluginabi.MethodModelRegister:
+		return handleModelRegister(request)
 	case pluginabi.MethodModelStatic:
 		return handleModelStatic(request)
 	case pluginabi.MethodModelForAuth:

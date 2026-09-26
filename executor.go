@@ -183,6 +183,14 @@ func prepareExecution(request []byte) (preparedExecution, error) {
 	prepared.region = region
 	prepared.model = bareModel
 
+	// 检查模型是否已被插件配置禁用。
+	fullModelID := PrefixModelID(region, bareModel)
+	if modelDisabled(prepared.rpc.Model) || modelDisabled(fullModelID) || modelDisabled(bareModel) {
+		return prepared, newPluginError("model_disabled",
+			fmt.Sprintf("model %q is disabled by plugin configuration", prepared.rpc.Model),
+			http.StatusBadRequest)
+	}
+
 	// 域被配置关闭时直接拒绝（而不是让请求打到错误的上游域名）。
 	if !realmEnabled(loadedConfig(), string(region)) {
 		return prepared, newPluginError("workbuddy_realm_disabled",

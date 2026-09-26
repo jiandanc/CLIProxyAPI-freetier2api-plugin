@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"workbuddy2api-plugin/cpasdk/pluginabi"
 	"workbuddy2api-plugin/cpasdk/pluginapi"
@@ -14,18 +15,20 @@ import (
 
 // hostAuthEntry 是宿主凭证列表里的一条。
 //
-// 字段与 pluginapi.HostAuthFileEntry 对齐；这里只声明用得到的部分，
-// 其余字段（size、modtime 等）对本插件没有意义。
+// 字段与 pluginapi.HostAuthFileEntry 对齐。
 type hostAuthEntry struct {
-	ID          string `json:"id"`
-	AuthIndex   string `json:"auth_index"`
-	Name        string `json:"name"`
-	Provider    string `json:"provider"`
-	Label       string `json:"label"`
-	Status      string `json:"status"`
-	Disabled    bool   `json:"disabled"`
-	Unavailable bool   `json:"unavailable"`
-	RuntimeOnly bool   `json:"runtime_only"`
+	ID          string    `json:"id"`
+	AuthIndex   string    `json:"auth_index"`
+	Name        string    `json:"name"`
+	Provider    string    `json:"provider"`
+	Label       string    `json:"label"`
+	Status      string    `json:"status"`
+	Disabled    bool      `json:"disabled"`
+	Unavailable bool      `json:"unavailable"`
+	RuntimeOnly bool      `json:"runtime_only"`
+	Path        string    `json:"path,omitempty"`
+	ModTime     time.Time `json:"modtime,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at,omitempty"`
 }
 
 // pluginAuthName 是本插件凭证在宿主里的类型名（对应宿主 auth 记录的 Type）。
@@ -62,14 +65,51 @@ func listHostAuths(ctx context.Context, callbackID string) ([]hostAuthEntry, err
 	if errUnmarshal := json.Unmarshal(raw, &wrapper); errUnmarshal != nil {
 		return nil, fmt.Errorf("decode host.auth.list: %w", errUnmarshal)
 	}
-	entries = append(wrapper.Auths, wrapper.Files...)
+	// 宿主返回的 Auths 是内存运行时实例，Files 是磁盘物理文件。
+	// 按文件名将 Files 的文件属性（如 ModTime、Path）合入 Auths，避免将同一凭证重复展示。
+	entries = mergeAuthsAndFiles(wrapper.Auths, wrapper.Files)
 	return filterPluginAuths(entries), nil
+}
+
+// mergeAuthsAndFiles 合并宿主 Auths 与 Files，避免同一凭证出现重复条目。
+func mergeAuthsAndFiles(auths, files []hostAuthEntry) []hostAuthEntry {
+	if len(files) == 0 {
+		return auths
+	}
+	if len(auths) == 0 {
+		return files
+	}
+
+	out := make([]hostAuthEntry, len(auths))
+	copy(out, auths)
+	authIdxByName := make(map[string]int, len(auths))
+	for i, a := range out {
+		if key := normalizeAuthKey(a.Name); key != "" {
+			authIdxByName[key] = i
+		}
+		if key := normalizeAuthKey(a.ID); key != "" {
+			authIdxByName[key] = i
+		}
+	}
+
+	for _, file := range files {
+		key := normalizeAuthKey(file.Name)
+		if key == "" {
+			key = normalizeAuthKey(file.ID)
+		}
+		if idx, found := authIdxByName[key]; found {
+			mergeHostAuthEntry(&out[idx], file)
+		} else {
+			out = append(out, file)
+		}
+	}
+	return out
 }
 
 // filenameHint 是凭证文件名的归属提示（与 cb.RegisterPathHint 一致）。
 const filenameHint = "workbuddy"
 
-// filterPluginAuths 只保留属于本插件的凭证。
+// filterPluginAuths 只保留属于本插件的凭证，并对重复条目（如同时出现在 Auths 与 Files 中）进行去重合并。
 //
 // 判据有两层，命中任一即收下：
 //  1. provider 是本插件（正常情况）；
@@ -79,17 +119,66 @@ const filenameHint = "workbuddy"
 // 两层都不会误吞别家凭证：别家的文件名不含 workbuddy。
 func filterPluginAuths(entries []hostAuthEntry) []hostAuthEntry {
 	out := make([]hostAuthEntry, 0, len(entries))
+	indexByKey := make(map[string]int)
+
 	for _, entry := range entries {
 		provider := strings.TrimSpace(entry.Provider)
-		if provider != "" && strings.EqualFold(provider, pluginAuthName) {
-			out = append(out, entry)
+		belongs := (provider != "" && strings.EqualFold(provider, pluginAuthName)) || fileNameBelongsToPlugin(entry.Name)
+		if !belongs {
 			continue
 		}
-		if fileNameBelongsToPlugin(entry.Name) {
-			out = append(out, entry)
+
+		// 归一化去重键：优先用去掉 .json 的 Name，其次用 ID
+		key := normalizeAuthKey(entry.Name)
+		if key == "" {
+			key = normalizeAuthKey(entry.ID)
 		}
+		if key == "" {
+			key = strings.TrimSpace(entry.AuthIndex)
+		}
+
+		if idx, exists := indexByKey[key]; exists && key != "" {
+			mergeHostAuthEntry(&out[idx], entry)
+			continue
+		}
+
+		if key != "" {
+			indexByKey[key] = len(out)
+		}
+		out = append(out, entry)
 	}
 	return out
+}
+
+func normalizeAuthKey(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	s = strings.ToLower(s)
+	s = strings.TrimSuffix(s, ".json")
+	return s
+}
+
+func mergeHostAuthEntry(target *hostAuthEntry, source hostAuthEntry) {
+	if target.AuthIndex == "" && source.AuthIndex != "" {
+		target.AuthIndex = source.AuthIndex
+	}
+	if target.Path == "" && source.Path != "" {
+		target.Path = source.Path
+	}
+	if target.ModTime.IsZero() && !source.ModTime.IsZero() {
+		target.ModTime = source.ModTime
+	}
+	if target.Label == "" && source.Label != "" {
+		target.Label = source.Label
+	}
+	if target.Status == "" && source.Status != "" {
+		target.Status = source.Status
+	}
+	if target.RuntimeOnly && !source.RuntimeOnly {
+		target.RuntimeOnly = false
+	}
 }
 
 // fileNameBelongsToPlugin 判断文件名是否符合本插件的命名约定。
@@ -139,23 +228,29 @@ func fetchAuthJSON(ctx context.Context, callbackID, authID string) ([]byte, erro
 	return nil, fmt.Errorf("auth %s not found", authID)
 }
 
-// getAuthJSONByIndex 按 auth_index 取凭证 JSON。
-func getAuthJSONByIndex(ctx context.Context, callbackID, authIndex string) ([]byte, bool) {
+// getAuthJSONAndPathByIndex 按 auth_index 取凭证 JSON 和物理文件路径。
+func getAuthJSONAndPathByIndex(ctx context.Context, callbackID, authIndex string) ([]byte, string, bool) {
 	trimmed := strings.TrimSpace(authIndex)
 	if trimmed == "" {
-		return nil, false
+		return nil, "", false
 	}
 	raw, errCall := callHostScoped(callbackID, pluginabi.MethodHostAuthGet, pluginapi.HostAuthGetRequest{AuthIndex: trimmed})
 	if errCall != nil {
 		logHostCallFailure(pluginabi.MethodHostAuthGet, errCall)
-		return nil, false
+		return nil, "", false
 	}
 	var response pluginapi.HostAuthGetResponse
 	if errUnmarshal := json.Unmarshal(raw, &response); errUnmarshal != nil {
-		return nil, false
+		return nil, "", false
 	}
 	if len(response.JSON) == 0 {
-		return nil, false
+		return nil, "", false
 	}
-	return response.JSON, true
+	return response.JSON, response.Path, true
+}
+
+// getAuthJSONByIndex 按 auth_index 取凭证 JSON。
+func getAuthJSONByIndex(ctx context.Context, callbackID, authIndex string) ([]byte, bool) {
+	raw, _, ok := getAuthJSONAndPathByIndex(ctx, callbackID, authIndex)
+	return raw, ok
 }

@@ -102,8 +102,7 @@ func handleModelsToggle(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 	return jsonResponse(http.StatusOK, map[string]any{
 		"ok": true, "changed": len(targets), "disabled": body.Disabled,
 		"disabled_models": snapshotState().DisabledModels,
-		"message": "已" + toggleVerb(body.Disabled) + " " + itoa(len(targets)) + " 个模型；" +
-			"重启宿主后 /v1/models 生效",
+		"message":         "已" + toggleVerb(body.Disabled) + " " + itoa(len(targets)) + " 个模型（调用即时拦截，但列表消除需重启容器）",
 	})
 }
 

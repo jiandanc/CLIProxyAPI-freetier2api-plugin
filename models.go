@@ -333,3 +333,20 @@ func refreshModelsFromUpstream(ctx context.Context) (int, error) {
 	persistModels(client)
 	return total, nil
 }
+
+// handleModelRegister 处理宿主的 model.register 契约（ModelRegistrar）。
+func handleModelRegister(request []byte) ([]byte, error) {
+	var rpc staticModelRPCRequest
+	if errDecode := decodeRequest(request, &rpc); errDecode != nil {
+		return nil, newPluginError("invalid_request", errDecode.Error(), http.StatusBadRequest)
+	}
+	ctx := httpx.WithCallbackID(context.Background(), rpc.HostCallbackID)
+	models, errModels := staticModels(ctx)
+	if errModels != nil {
+		return nil, errModels
+	}
+	return okEnvelope(pluginapi.ModelRegistrationResponse{
+		Provider: providerKey,
+		Models:   models,
+	})
+}

@@ -104,20 +104,20 @@ progress { width: 160px; height: 8px; }
 
   <section id="view-accounts">
     <div class="card">
-      <h2>账号概览</h2>
+      <h2>账号概览 <span class="muted" id="accountCount"></span></h2>
       <div class="row">
         <button class="act primary" id="btnAddCn">添加账号（国内版）</button>
         <button class="act primary" id="btnAddGlobal">添加账号（国际版）</button>
-        <button class="act" id="btnRefresh">刷新</button>
+        <button class="act" id="btnRefresh">刷新（Token续期）</button>
         <button class="act" id="btnLoadQuotas">查询额度</button>
         <button class="act" id="btnCheckin">全部签到</button>
         <button class="act primary" id="btnAutoAll">全部一键完成任务</button>
       </div>
       <div class="hint">
-        添加账号走 OAuth 设备授权，国内版与国际版凭证不通用，请按账号实际站点选择。
+        「刷新（Token续期）」向腾讯上游请求刷新全部账号的 Auth Token（保活续期），续期成功后将更新凭证文件的修改时间；「查询额度」批量拉取账号额度；添加账号走 OAuth 设备授权，国内版与国际版凭证不通用，请按账号实际站点选择。<br>
         「全部一键完成任务」逐账号依次执行成长任务（顺序即依赖序），
         其中专家类、技能与夜猫子含<b>真实对话</b>，会消耗账号额度，账号多时耗时较长。
-        活跃上报、Token 保活、猫猫旅行与夜猫子都由每日排程自动执行，无需手动触发。
+        活跃上报、Token 保活、猫猫旅行与夜猫子都由每日排程自动执行，也可随时手动触发。
         国际版账号没有签到与成长任务体系（上游不提供），相关操作会自动跳过。
       </div>
 
@@ -150,8 +150,8 @@ progress { width: 160px; height: 8px; }
       <div class="hint">
         模型 ID 带 <b>cn:</b> 或 <b>global:</b> 前缀，分别对应国内版与国际版账号——
         前缀决定请求被路由到哪个域的凭证，两域凭证不通用。
-        勾选后点「禁用选中 / 启用选中」批量操作；被禁用的模型不再注册给宿主
-        （需重启宿主后生效），列表里仍会保留并标注状态。
+        勾选后点「禁用选中 / 启用选中」批量操作；禁用即时生效（请求将被直接拦截拒绝），
+        列表里仍会保留并标注状态。
       </div>
       <div id="models"></div>
     </div>
@@ -418,7 +418,7 @@ progress { width: 160px; height: 8px; }
     }
     var table = el("table");
     var head = el("tr");
-    ["账号", "域", "状态", "签到", "剩余 / 总额", "使用率"]
+    ["账号", "域", "状态", "签到", "剩余 / 总额", "使用率", "刷新时间"]
       .forEach(function (name) { head.appendChild(el("th", name)); });
     table.appendChild(head);
 
@@ -465,6 +465,10 @@ progress { width: 160px; height: 8px; }
         row.appendChild(barCell);
       }
 
+      // 刷新时间列（展示凭证文件的最后更新时间）
+      var rt = account.refreshed_at ? new Date(account.refreshed_at).toLocaleString() : "-";
+      row.appendChild(el("td", rt, "muted"));
+
       table.appendChild(row);
     });
     host.appendChild(table);
@@ -478,8 +482,8 @@ progress { width: 160px; height: 8px; }
   //
   // 返回 Promise 是必要的：额度结果要靠账号表渲染出来，两者若并行，
   // 额度先到而状态后到就会被"查询中"覆盖（反之亦然）。串行才稳定。
-  function loadStatus() {
-    clearBanner();
+  function loadStatus(skipClearBanner) {
+    if (!skipClearBanner) clearBanner();
     return api("GET", "/status").then(function (status) {
       if (!status) return;
       lastStatus = status;
@@ -491,7 +495,7 @@ progress { width: 160px; height: 8px; }
       var scheduler = status.scheduler || {};
       document.getElementById("scheduleInfo").textContent =
         "下次执行：" + (scheduler.next_at || "-") + " · 任务：" + ((scheduler.next_tasks || []).join(", ") || "无");
-    }).catch(function (err) { banner("err", err.message); });
+    }).catch(function (err) { banner("err", err.message); throw err; });
   }
 
   // ---- 额度 ----
@@ -502,7 +506,7 @@ progress { width: 160px; height: 8px; }
   // 手动点按钮时才给反馈。
   function loadQuotas(quiet) {
     if (!quiet) banner("ok", "正在查询全部账号额度…");
-    api("POST", "/quotas", {}).then(function (data) {
+    return api("POST", "/quotas", {}).then(function (data) {
       if (!data) return;
       var results = (data && data.results) || [];
       quotaByAuth = {};
@@ -514,7 +518,10 @@ progress { width: 160px; height: 8px; }
       var failed = results.filter(function (r) { return !r.ok; }).length;
       banner(failed ? "warn" : "ok",
         "额度查询完成：" + results.length + " 个账号" + (failed ? "，" + failed + " 个失败" : ""));
-    }).catch(function (err) { if (!quiet) banner("err", err.message); });
+    }).catch(function (err) {
+      if (!quiet) banner("err", err.message);
+      throw err;
+    });
   }
 
   // ---- 模型 ----
@@ -601,8 +608,7 @@ progress { width: 160px; height: 8px; }
     var verb = disabled ? "禁用" : "启用";
     api("POST", "/models/toggle", { models: ids, disabled: disabled }).then(function (data) {
       if (!data) return;
-      banner("warn", "已" + verb + " " + (data.changed || ids.length) + " 个模型。"
-        + "需要重启宿主后 /v1/models 才会生效（宿主的模型注册表只在插件重载时读取）。");
+      banner("warn", "已" + verb + " " + (data.changed || ids.length) + " 个模型。调用已即时拦截，但列表消除需要重启 cliproxyapi 容器。");
       loadModels(false);
     }).catch(function (err) { banner("err", err.message); });
   }
@@ -849,15 +855,26 @@ progress { width: 160px; height: 8px; }
     }
   });
 
-  // 主「刷新」按钮同时刷新状态、模型清单与额度。
-  //
-  // 额度也要重查：账号可能在这期间新增/删除，只刷状态会让新账号
-  // 一直停在"查询中"（它的额度从没被查过）。
+  // 主「刷新」按钮执行 Token 续期保活，完成后刷新页面状态以展示最新文件修改时间。
   document.getElementById("btnRefresh").addEventListener("click", function () {
-    modelsLoaded = false;   // 允许这次刷新重新触发上游拉取
-    loadModels(true);
-    // 串行：账号表先更新，额度再填充。
-    loadStatus().then(function () { loadQuotas(true); });
+    var btn = this;
+    btn.disabled = true;
+    banner("ok", "正在向腾讯上游发起全账号 Token 续期刷新，请稍候…");
+    api("POST", "/keepalive", {}).then(function (res) {
+      if (!res) return;
+      if (res.failed > 0 && res.succeeded === 0) {
+        banner("err", "Token 续期失败：" + (res.message || "上游拒绝"));
+      } else if (res.failed > 0) {
+        banner("warn", res.message || ("Token 续期部分成功：" + res.succeeded + " 成功，" + res.failed + " 失败"));
+      } else {
+        banner("ok", res.message || "全账号 Token 续期成功");
+      }
+      return loadStatus(true);
+    }).catch(function (err) {
+      banner("err", "Token 续期请求失败：" + err.message);
+    }).then(function () {
+      btn.disabled = false;
+    });
   });
   document.getElementById("btnLoadQuotas").addEventListener("click", function () { loadQuotas(false); });
   document.getElementById("btnLoadModels").addEventListener("click", loadModels);

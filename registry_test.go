@@ -114,6 +114,7 @@ func TestConsolePagePathsAreDeclared(t *testing.T) {
 	referenced := []string{
 		"/status", "/logs", "/checkin", "/quotas", "/models/refresh",
 		"/settings", "/tasks/scan", "/tasks/run", "/tasks/queue", "/tasks/auto",
+		"/keepalive",
 	}
 	for _, path := range referenced {
 		if !strings.Contains(page, `"`+path) {

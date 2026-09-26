@@ -12,11 +12,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"workbuddy2api-plugin/cpasdk/pluginabi"
 	"workbuddy2api-plugin/cpasdk/pluginapi"
 	"workbuddy2api-plugin/internal/cb"
 	"workbuddy2api-plugin/internal/httpx"
@@ -136,7 +139,7 @@ func handleManagement(request []byte) ([]byte, error) {
 		return okEnvelope(handleScheduledRun(rpc, "activity"))
 
 	case method == http.MethodPost && matchesManagementPath(rpc.Path, "/keepalive"):
-		return okEnvelope(handleScheduledRun(rpc, "keepalive"))
+		return okEnvelope(handleKeepaliveRequest(rpc))
 
 	case method == http.MethodPost && matchesManagementPath(rpc.Path, "/blackcat"):
 		return okEnvelope(handleScheduledRun(rpc, "blackcat"))
@@ -362,14 +365,14 @@ func buildStatusPayload(req pluginapi.ManagementRequest) map[string]any {
 
 // accountSummary 是账号概览条目（不含凭证）。
 type accountSummary struct {
-	AuthID    string `json:"auth_id"`
-	AuthIndex string `json:"auth_index"`
-	Label     string `json:"label"`
-	Realm     string `json:"realm"`
-	Status    string `json:"status"`
-	Disabled  bool   `json:"disabled"`
-	// Checkin 是签到记录（可能为空）。
-	Checkin *checkinRecord `json:"checkin,omitempty"`
+	AuthID      string         `json:"auth_id"`
+	AuthIndex   string         `json:"auth_index"`
+	Label       string         `json:"label"`
+	Realm       string         `json:"realm"`
+	Status      string         `json:"status"`
+	Disabled    bool           `json:"disabled"`
+	RefreshedAt string         `json:"refreshed_at,omitempty"`
+	Checkin     *checkinRecord `json:"checkin,omitempty"`
 }
 
 // listAccountSummaries 列出本插件名下的账号概览。
@@ -383,6 +386,8 @@ func listAccountSummaries(ctx context.Context, callbackID string) []accountSumma
 	cfg := loadedConfig()
 
 	out := make([]accountSummary, 0, len(entries))
+	seenIndex := make(map[string]int)
+
 	for _, entry := range entries {
 		summary := accountSummary{
 			AuthID:    firstNonEmptyString(entry.ID, entry.Name),
@@ -391,22 +396,77 @@ func listAccountSummaries(ctx context.Context, callbackID string) []accountSumma
 			Status:    entry.Status,
 			Disabled:  entry.Disabled,
 		}
+
+		var modTime time.Time
+		if !entry.ModTime.IsZero() {
+			modTime = entry.ModTime
+		} else if entry.Path != "" {
+			if fi, err := os.Stat(entry.Path); err == nil {
+				modTime = fi.ModTime()
+			}
+		}
+
 		// realm 从凭证里读；读不到时按配置兜底。
-		if raw, okRaw := getAuthJSONByIndex(ctx, callbackID, entry.AuthIndex); okRaw {
+		var accountUID string
+		if raw, filePath, okRaw := getAuthJSONAndPathByIndex(ctx, callbackID, entry.AuthIndex); okRaw {
+			if modTime.IsZero() && filePath != "" {
+				if fi, err := os.Stat(filePath); err == nil {
+					modTime = fi.ModTime()
+				}
+			}
 			if credential, errParse := cb.ParseCredential(raw, defaultRealmForParse(cfg)); errParse == nil {
 				summary.Realm = string(credential.Realm())
 				if nickname := credential.NicknameValue(); nickname != "" {
 					summary.Label = nickname
 				}
 				if uid := credential.UIDValue(); uid != "" {
+					accountUID = uid
 					if record, okRecord := state.Checkin[uid]; okRecord {
 						summary.Checkin = &record
 					}
 				}
 			}
 		}
+		if modTime.IsZero() && entry.Name != "" {
+			for _, dir := range []string{"/root/.cli-proxy-api", "."} {
+				candidate := filepath.Join(dir, entry.Name)
+				if fi, err := os.Stat(candidate); err == nil {
+					modTime = fi.ModTime()
+					break
+				}
+			}
+		}
+		if !modTime.IsZero() {
+			summary.RefreshedAt = modTime.Format(time.RFC3339)
+		}
 		if summary.Realm == "" {
 			summary.Realm = string(defaultRealmForParse(cfg))
+		}
+
+		// 账号唯一键：优先使用账号 UID，兜底使用规范化后的 AuthID
+		dedupKey := accountUID
+		if dedupKey == "" {
+			dedupKey = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(summary.AuthID), ".json"))
+		}
+
+		if idx, exists := seenIndex[dedupKey]; exists && dedupKey != "" {
+			// 同账号合并更新，避免在页面重复展示多行
+			if out[idx].RefreshedAt == "" && summary.RefreshedAt != "" {
+				out[idx].RefreshedAt = summary.RefreshedAt
+			}
+			if out[idx].Label == "" || out[idx].Label == out[idx].AuthID {
+				if summary.Label != "" {
+					out[idx].Label = summary.Label
+				}
+			}
+			if out[idx].Checkin == nil && summary.Checkin != nil {
+				out[idx].Checkin = summary.Checkin
+			}
+			continue
+		}
+
+		if dedupKey != "" {
+			seenIndex[dedupKey] = len(out)
 		}
 		out = append(out, summary)
 	}
@@ -748,6 +808,131 @@ func handleScheduledRun(req pluginapi.ManagementRequest, kind string) any {
 	return jsonResponse(http.StatusOK, map[string]any{
 		"ok": true, "started": true, "task": kind,
 		"message": "任务已在后台开始执行，进度见插件日志",
+	})
+}
+
+// keepaliveResult 是单账号 Token 续期的结果。
+type keepaliveResult struct {
+	AuthID  string `json:"auth_id"`
+	Label   string `json:"label"`
+	Realm   string `json:"realm"`
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+}
+
+// handleKeepaliveRequest 手动执行全账号 Token 续期保活。
+func handleKeepaliveRequest(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
+	ctx, cancel := managementContext(req)
+	defer cancel()
+	callbackID := hostCallbackID(req)
+
+	entries, errList := listHostAuths(ctx, callbackID)
+	if errList != nil {
+		return jsonResponse(http.StatusOK, map[string]any{
+			"ok": false, "error": "读取账号列表失败：" + errList.Error(),
+		})
+	}
+
+	cfg := loadedConfig()
+	type job struct {
+		entry      hostAuthEntry
+		credential *cb.Credential
+		rawJSON    []byte
+		filePath   string
+	}
+	jobs := make([]job, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Disabled || entry.Unavailable {
+			continue
+		}
+		raw, filePath, okRaw := getAuthJSONAndPathByIndex(ctx, callbackID, entry.AuthIndex)
+		if !okRaw {
+			continue
+		}
+		credential, errParse := cb.ParseCredential(raw, defaultRealmForParse(cfg))
+		if errParse != nil {
+			continue
+		}
+		if filePath != "" {
+			credential.FilePath = filePath
+		}
+		jobs = append(jobs, job{entry: entry, credential: credential, rawJSON: raw, filePath: filePath})
+	}
+
+	if len(jobs) == 0 {
+		return jsonResponse(http.StatusOK, map[string]any{
+			"ok": true, "message": "没有需要续期的可用账号", "succeeded": 0, "failed": 0, "results": []any{},
+		})
+	}
+
+	results := make([]keepaliveResult, len(jobs))
+	var (
+		succeededCount int
+		failedCount    int
+		firstErrMsg    string
+	)
+	for i, j := range jobs {
+		client := newUpstreamClient(ctx)
+		label := firstNonEmptyString(j.credential.NicknameValue(), j.entry.Label, j.entry.Name)
+		res := keepaliveResult{
+			AuthID: firstNonEmptyString(j.entry.ID, j.entry.Name),
+			Label:  label,
+			Realm:  string(j.credential.Realm()),
+		}
+
+		errRefresh := client.RefreshToken(j.credential)
+		if errRefresh != nil {
+			failedCount++
+			res.OK = false
+			res.Message = errRefresh.Error()
+			if firstErrMsg == "" {
+				firstErrMsg = fmt.Sprintf("%s: %s", label, errRefresh.Error())
+			}
+			logger.Error("keepalive %s: %v", label, errRefresh)
+		} else {
+			succeededCount++
+			res.OK = true
+			res.Message = "Token 续期成功"
+			// 写回宿主与磁盘
+			if updated, errMerge := cb.MergeStorageJSON(j.rawJSON, j.credential); errMerge == nil {
+				if _, errSave := callHostScoped(callbackID, pluginabi.MethodHostAuthSave, pluginapi.HostAuthSaveRequest{
+					Name: j.entry.Name,
+					JSON: updated,
+				}); errSave != nil {
+					logger.Debug("keepalive %s: host.auth.save failed: %v", label, errSave)
+				}
+			}
+			targetPath := j.filePath
+			if targetPath == "" && j.entry.Path != "" {
+				targetPath = j.entry.Path
+			}
+			if targetPath == "" && j.entry.Name != "" {
+				targetPath = filepath.Join("/root/.cli-proxy-api", j.entry.Name)
+			}
+			if errSave := cb.SaveCredentialFile(targetPath, j.credential); errSave != nil {
+				logger.Debug("keepalive %s: save credential file failed: %v", label, errSave)
+			}
+			logger.Info("keepalive %s: token refreshed and saved", label)
+		}
+		results[i] = res
+	}
+
+	var message string
+	if failedCount > 0 && succeededCount == 0 {
+		message = fmt.Sprintf("全部账号续期失败（%s）", firstErrMsg)
+	} else if failedCount > 0 {
+		message = fmt.Sprintf("续期完成：%d 个成功，%d 个失败（%s）", succeededCount, failedCount, firstErrMsg)
+	} else {
+		message = fmt.Sprintf("全账号 Token 续期成功（共 %d 个账号已更新）", succeededCount)
+	}
+
+	return jsonResponse(http.StatusOK, map[string]any{
+		"ok":        failedCount == 0,
+		"total":     len(jobs),
+		"succeeded": succeededCount,
+		"failed":    failedCount,
+		"message":   message,
+		"results":   results,
 	})
 }
 

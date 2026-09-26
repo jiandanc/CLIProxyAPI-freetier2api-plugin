@@ -282,11 +282,17 @@ func (c *Client) RefreshToken(cred *Credential) error {
 		return enrichClassifyError(resp.StatusCode, string(body), resp.Header)
 	}
 
-	var token refreshTokenResponse
-	if errUnmarshal := json.Unmarshal(body, &token); errUnmarshal != nil {
-		return fmt.Errorf("decode refresh response: %w", errUnmarshal)
+	var envelope struct {
+		Code int                  `json:"code"`
+		Msg  string               `json:"msg"`
+		Data refreshTokenResponse `json:"data"`
 	}
-	if strings.TrimSpace(token.AccessToken) == "" {
+	var token refreshTokenResponse
+	if errUnmarshal := json.Unmarshal(body, &envelope); errUnmarshal == nil && envelope.Code == 0 && strings.TrimSpace(envelope.Data.AccessToken) != "" {
+		token = envelope.Data
+	} else if errUnmarshal == nil && envelope.Code != 0 {
+		return fmt.Errorf("refresh failed: code=%d msg=%s", envelope.Code, envelope.Msg)
+	} else if errDirect := json.Unmarshal(body, &token); errDirect != nil || strings.TrimSpace(token.AccessToken) == "" {
 		return fmt.Errorf("refresh failed: no accessToken in response — re-login required")
 	}
 

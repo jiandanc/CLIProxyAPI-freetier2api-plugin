@@ -198,6 +198,7 @@ func handleAuthRefresh(request []byte) ([]byte, error) {
 	if updated, errStorage := cb.MergeStorageJSON(rpc.StorageJSON, credential); errStorage == nil {
 		storage = updated
 	}
+	logger.Info("auth refresh succeeded for %s (realm=%s)", rpc.AuthID, credential.Realm())
 	return okEnvelope(pluginapi.AuthRefreshResponse{
 		Auth:             refreshedAuthData(rpc, storage, credential),
 		NextRefreshAfter: time.Now().Add(authRefreshInterval),

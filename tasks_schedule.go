@@ -9,6 +9,8 @@ import (
 	"context"
 	"fmt"
 
+	"workbuddy2api-plugin/cpasdk/pluginabi"
+	"workbuddy2api-plugin/cpasdk/pluginapi"
 	"workbuddy2api-plugin/internal/cb"
 	"workbuddy2api-plugin/internal/logger"
 	"workbuddy2api-plugin/internal/tasks"
@@ -110,9 +112,21 @@ func runKeepaliveAll(ctx context.Context) {
 			logger.Error("keepalive %s: %v", account.label(), errRefresh)
 			return nil
 		}
+		raw, okRaw := getAuthJSONByIndex(ctx, account.callbackID, account.entry.AuthIndex)
+		if okRaw {
+			if updated, errMerge := cb.MergeStorageJSON(raw, account.credential); errMerge == nil {
+				if _, errSave := callHostScoped(account.callbackID, pluginabi.MethodHostAuthSave, pluginapi.HostAuthSaveRequest{
+					Name: account.entry.Name,
+					JSON: updated,
+				}); errSave != nil {
+					logger.Debug("keepalive %s: host.auth.save failed: %v", account.label(), errSave)
+				}
+			}
+		}
 		if errSave := cb.SaveCredentialFile(account.credential.FilePath, account.credential); errSave != nil {
 			logger.Debug("keepalive %s: save credential failed: %v", account.label(), errSave)
 		}
+		logger.Info("keepalive %s: token refreshed and saved", account.label())
 		count++
 		return nil
 	})
