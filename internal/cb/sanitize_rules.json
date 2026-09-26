@@ -1,0 +1,38 @@
+{
+  "features": [
+    "x-anthropic-billing-header",
+    "cc_entrypoint=",
+    "You are Claude Code",
+    "Main branch (",
+    "You are a coding agent running in the Codex CLI",
+    "github.com/anthropics/",
+    "11128"
+  ],
+  "rewrites": [
+    [
+      "You are Claude Code, Anthropic's official CLI for Claude",
+      "You are Claude Code, Anthropic's official CLI tool for Claude"
+    ],
+    [
+      "Main branch (you will usually use this for PRs)",
+      "Default branch (you will usually use this for PRs)"
+    ],
+    [
+      "You are a coding agent running in the Codex CLI, a terminal-based coding assistant.",
+      "You are a coding agent running in the Codex CLI tool, a terminal-based coding assistant."
+    ],
+    [
+      "To give feedback, users should report the issue at https://github.com/anthropics/claude-code/issues",
+      "To provide feedback, users should report the issue at https://github.com/anthropics/claude-code/issues"
+    ],
+    [
+      "code=11128",
+      "11128"
+    ]
+  ],
+  "regexes": {
+    "sanitizeHdrRe": "(?i)x-anthropic-billing-header:[^;\\n]*;?\\s*",
+    "sanitizeBareHdrRe": "(?i)x-anthropic-billing-header",
+    "sanitizeKvRe": "(?i)\\bcc_[a-z0-9_]+=[^;\\n]*;?\\s*"
+  }
+}

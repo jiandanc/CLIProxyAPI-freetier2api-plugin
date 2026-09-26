@@ -1,0 +1,38 @@
+# 构建产物（不要提交：动态库是平台相关的）
+dist/
+*.so
+*.dylib
+*.dll
+# c-shared 构建会在 dist/ 旁边生成同名头文件；但 bridge.h 是**手写的源码**，
+# 是构建必需文件（见下面的反向规则）。
+*.h
+# bridge.h 是 C ABI 桥的头文件，必须入库——否则别人克隆后编译不过。
+!bridge.h
+
+# 宿主侧的凭证与运行状态（**绝不能进版本库**）
+auths/
+state.json
+models.json
+machine_salt
+logs/
+*.log
+
+# 本地配置与密钥
+.env
+.env.*
+cpa-management-key
+
+# 编辑器与系统文件
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# 测试与调试临时产物
+tmp/
+*.out
+coverage.out
+
+# macOS
+**/.DS_Store
