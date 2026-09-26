@@ -1,0 +1,227 @@
+name: CI
+
+# main 分支与 PR 上跑测试 + 构建；打 v* tag 时额外发布 Release（含各平台动态库）。
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 同一 ref 上只保留最新一次运行；tag 构建不取消（要出 Release）。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  test:
+    name: 测试（gofmt / vet / go test）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          # 本项目没有第三方依赖（无 go.sum），关掉模块缓存以免 setup-go 报警告。
+          cache: false
+
+      - name: gofmt
+        shell: bash
+        run: |
+          set -euo pipefail
+          # cpasdk/ 是与宿主 ABI 对齐的 vendored 副本，保持与上游一致的排版，不参与格式检查。
+          unformatted=$(gofmt -l . | grep -v '^cpasdk/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未通过 gofmt："
+            echo "$unformatted"
+            exit 1
+          fi
+          echo "gofmt clean"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test ./... -count=1 -timeout 300s
+
+  build:
+    name: 构建 ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    # darwin/amd64 与 windows/amd64 属于尽力而为的平台：失败不阻塞其他平台出产物与 Release。
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  goos: linux,   goarch: amd64, ext: so,    cc: gcc,                   experimental: false }
+          - { os: ubuntu-latest,  goos: linux,   goarch: arm64, ext: so,    cc: aarch64-linux-gnu-gcc, experimental: false }
+          - { os: macos-14,       goos: darwin,  goarch: arm64, ext: dylib, cc: clang,                 experimental: false }
+          - { os: macos-14,       goos: darwin,  goarch: amd64, ext: dylib, cc: 'clang -arch x86_64', experimental: true }
+          - { os: windows-latest, goos: windows, goarch: amd64, ext: dll,   cc: gcc,                   experimental: true }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
+      - name: 安装交叉编译器（linux/arm64）
+        if: matrix.cc == 'aarch64-linux-gnu-gcc'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: 环境信息
+        shell: bash
+        run: |
+          go version
+          ${{ matrix.cc }} --version | head -1
+
+      - name: 构建 c-shared 插件
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CC: ${{ matrix.cc }}
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          go build -buildmode=c-shared -trimpath \
+            -ldflags "-s -w -X main.pluginVersion=${VERSION}" \
+            -o "dist/workbuddy2api-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.ext }}" .
+          ls -la dist
+
+      # 插件商店安装要求归档名 {id}_{version}_{goos}_{goarch}.zip，
+      # 且 zip 根目录下只能有 {id}{ext} 一个动态库；见 scripts/packstore。
+      - name: 打包插件商店归档（仅 tag）
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          VERSION_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # 归档名里的版本号是 tag 去掉前导 v（宿主按同样规则从 tag 推导）。
+          go run ./scripts/packstore \
+            -lib "dist/workbuddy2api-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.ext }}" \
+            -id workbuddy2api \
+            -version "${VERSION_TAG#v}" \
+            -goos ${{ matrix.goos }} \
+            -goarch ${{ matrix.goarch }} \
+            -out-dir dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workbuddy2api-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/workbuddy2api-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.ext }}
+            dist/workbuddy2api_*_${{ matrix.goos }}_${{ matrix.goarch }}.zip
+          if-no-files-found: error
+
+  release:
+    name: 发布 Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # gh 需要 git 仓库上下文（否则报 "not a git repository"）；
+      # fetch-depth: 0 是为了读到 tag 注解（Release 正文的「本版要点」）。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 下载全部平台产物
+        uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: false
+
+      - name: 生成插件商店校验和（checksums.txt）
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 必须在汇总阶段生成：矩阵里每个平台各写一份同名文件会互相覆盖，
+          # 导致部分 zip 的校验和丢失、宿主安装时直接报 checksum not found。
+          go run ./scripts/packstore -checksums-dir assets
+
+      - name: 生成裸文件校验和（SHA256SUMS.txt，供手动安装者核对）
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd assets
+          ls -la
+          shopt -s nullglob
+          libraries=(./*.so ./*.dylib ./*.dll)
+          if [ ${#libraries[@]} -gt 0 ]; then
+            sha256sum "${libraries[@]}" > SHA256SUMS.txt
+            cat SHA256SUMS.txt
+          fi
+
+      - name: 生成 Release 正文（安装说明 + tag 注解）
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          {
+            echo '## 通过 CPA 插件商店安装（推荐）'
+            echo
+            echo '在 CPA 的 `config.yaml` 里把本仓库的 `registry.json` 加为三方源：'
+            echo
+            echo '```yaml'
+            echo 'plugins:'
+            echo '  enabled: true'
+            echo '  store-sources:'
+            echo '    - "https://raw.githubusercontent.com/'"${GITHUB_REPOSITORY}"$'/main/registry.json"'
+            echo '```'
+            echo
+            echo '重启 CPA 后，在管理面板的插件商店里搜 **WorkBuddy 2API** 一键安装。'
+            echo
+            echo '## 手动安装'
+            echo
+            echo '下载对应平台的文件，**重命名成宿主认识的插件名**后放进 CPA 的 `plugins/` 目录：'
+            echo
+            echo '| 平台 | 下载文件 | 放进去时改名为 |'
+            echo '| --- | --- | --- |'
+            echo '| Linux x86_64 | `workbuddy2api-linux-amd64.so` | `workbuddy2api.so` |'
+            echo '| Linux arm64 | `workbuddy2api-linux-arm64.so` | `workbuddy2api.so` |'
+            echo '| macOS Apple Silicon | `workbuddy2api-darwin-arm64.dylib` | `workbuddy2api.dylib` |'
+            echo '| macOS Intel | `workbuddy2api-darwin-amd64.dylib` | `workbuddy2api.dylib` |'
+            echo '| Windows x64 | `workbuddy2api-windows-amd64.dll` | `workbuddy2api.dll` |'
+            echo
+            echo '`SHA256SUMS.txt` 可用于校验完整性；配置与账号导入见仓库 README。'
+            echo
+            echo '## 本版要点'
+            echo
+            # tag 注解作为本版要点；首行为空时去掉。
+            git tag -l --format='%(contents)' "$TAG" | sed '1{/^$/d}'
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: 创建 Release 并上传产物
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$TAG" \
+            --notes-file release-notes.md \
+            --generate-notes \
+            --verify-tag \
+            assets/*

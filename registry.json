@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "plugins": [
+    {
+      "id": "workbuddy2api",
+      "name": "WorkBuddy 2API",
+      "description": "把腾讯 CodeBuddy（WorkBuddy）账号接入 CLIProxyAPI：auth / model / executor / quota / management 五类能力，支持国内版与国际版双域隔离、模型清单动态探测、额度查询、每日签到、连登兑换与抽奖、猫猫旅行、夜猫子、成长任务一键完成与开学季活动。",
+      "author": "workbuddy2api",
+      "repository": "https://github.com/jiandanc/CLIProxyAPI-workbuddy2api-plugin",
+      "homepage": "https://github.com/jiandanc/CLIProxyAPI-workbuddy2api-plugin",
+      "license": "MIT",
+      "tags": ["Provider", "CodeBuddy", "WorkBuddy", "Auth", "Quota", "Management", "Tasks"]
+    }
+  ]
+}
