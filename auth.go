@@ -10,6 +10,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -217,8 +218,8 @@ func refreshedAuthData(rpc authRefreshRPCRequest, storageJSON []byte, credential
 
 // isCredentialRejected 报告错误是否表示凭证真的失效。
 func isCredentialRejected(err error) bool {
-	upstreamErr, okUpstream := err.(*cb.Error)
-	if !okUpstream {
+	var upstreamErr *cb.Error
+	if !errors.As(err, &upstreamErr) {
 		return false
 	}
 	switch upstreamErr.Kind {

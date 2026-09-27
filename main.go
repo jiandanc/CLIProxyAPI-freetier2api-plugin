@@ -30,7 +30,7 @@ import (
 var pluginVersion = defaultPluginVersion
 
 // defaultPluginVersion 是未注入时的版本号。
-const defaultPluginVersion = "0.0.2"
+const defaultPluginVersion = "0.0.3"
 
 // effectivePluginVersion 返回对外上报的版本号。
 //
@@ -315,8 +315,9 @@ func newUpstreamClient(ctx context.Context) *cb.Client {
 	return cb.NewClient(cb.Options{
 		Context:              ctx,
 		EnabledRealms:        cfg.EnabledRealms,
-		PromptMode:           cfg.PromptMode,
+		PromptMode:           promptModeFor(),
 		PromptText:           promptTextFor(cfg),
+		OnContentBlocked:     markPromptDegraded,
 		SanitizeFingerprints: cfg.SanitizeFingerprints,
 		PassthroughIP:        cfg.PassthroughIP,
 		UserAgent:            cfg.UserAgent,

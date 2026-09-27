@@ -331,6 +331,7 @@ func resetPluginGlobals(t *testing.T) {
 	stateMu.Lock()
 	stateCache = nil
 	stateMu.Unlock()
+	reloadDisabledModelCache(nil)
 
 	resetCredentialCache()
 	// 模型目录缓存是包级的：不重置会让上一个用例的探测结果泄漏到下一个。

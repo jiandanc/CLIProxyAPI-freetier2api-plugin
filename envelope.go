@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 )
 
 // envelope 是 CPA 插件 ABI 的 JSON 信封，与宿主 cpasdk/pluginabi.Envelope 对齐。
@@ -97,15 +96,4 @@ func decodeEnvelopeResult(raw []byte) (json.RawMessage, error) {
 		return nil, fmt.Errorf("host callback failed")
 	}
 	return append(json.RawMessage(nil), env.Result...), nil
-}
-
-// upstreamStatusError 把上游 HTTP 状态码映射成插件错误。
-//
-// 映射表是「原项目账号处置矩阵」在插件形态下的等价表达：插件不再自己维护冷却状态，
-// 而是把语义翻译成宿主认得的 HTTP 状态码，由宿主决定冷却/禁用/轮转。
-func upstreamStatusError(kind string, status int, message string) *pluginError {
-	if status <= 0 {
-		status = http.StatusBadGateway
-	}
-	return &pluginError{Code: kind, Message: message, HTTPStatus: status}
 }

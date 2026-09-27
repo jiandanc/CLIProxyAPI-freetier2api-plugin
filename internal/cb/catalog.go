@@ -30,9 +30,6 @@ const (
 //go:embed catalog_seed.json
 var catalogSeedRaw []byte
 
-//go:embed model.json
-var modelSeedRaw []byte
-
 // ModelInfo 是归一化后的模型元数据。
 type ModelInfo struct {
 	// ID 是上游模型名（不含插件侧的 realm 前缀）。
@@ -296,7 +293,7 @@ func LoadCachedModels(cached []ModelInfo, realm Region) {
 
 // applyCatalogFallbacks 用查找链补齐窗口与档位。
 //
-// 四级查找链（窗口）：上游动态值 → 静态兜底表 → model.json 种子 → 默认值。
+// 四级查找链（窗口）：上游动态值 → 静态兜底表 (catalog_seed) → 默认值。
 // 档位是三级链：上游动态值 → realm 分表静态兜底 → 省略字段。
 //
 // 两套链刻意不同：窗口有「宁可高估」的安全侧（低估会让客户端过早截断上下文），

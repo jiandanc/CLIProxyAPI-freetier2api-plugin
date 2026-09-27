@@ -184,8 +184,7 @@ func prepareExecution(request []byte) (preparedExecution, error) {
 	prepared.model = bareModel
 
 	// 检查模型是否已被插件配置禁用。
-	fullModelID := PrefixModelID(region, bareModel)
-	if modelDisabled(prepared.rpc.Model) || modelDisabled(fullModelID) || modelDisabled(bareModel) {
+	if isModelDisabled(region, bareModel) {
 		return prepared, newPluginError("model_disabled",
 			fmt.Sprintf("model %q is disabled by plugin configuration", prepared.rpc.Model),
 			http.StatusBadRequest)
@@ -341,4 +340,35 @@ func streamFailureMessage(err error) string {
 		return upstreamErr.Msg
 	}
 	return err.Error()
+}
+
+// gatewayHint 返回给某个错误码附加的提示文案（没有则返回空串）。
+func gatewayHint(code string, prepared preparedExecution) string {
+	trimmed := strings.TrimSpace(code)
+	switch trimmed {
+	case "11133":
+		if cb.HasImagePart(prepared.rpc.Payload) && !modelSupportsImages(prepared) {
+			return "model " + prepared.model + " does not support images; pick one with image support from /v1/models"
+		}
+		return "request parameters were rejected by the model provider; check message format and model capabilities"
+	case "11135":
+		return "image data rejected by upstream; use a real/valid image, may need a new conversation"
+	case "11115":
+		return "request context exceeds the model limit; reduce history or message size"
+	case "6004":
+		return "this model is temporarily rate-limited upstream; retry later or switch model"
+	case "11102":
+		return "upstream has no such model on this backend; switch model or retry on another account"
+	}
+	return ""
+}
+
+func modelSupportsImages(prepared preparedExecution) bool {
+	cached := cb.CachedModels()[prepared.region]
+	for _, model := range cached {
+		if model.ID == prepared.model {
+			return model.SupportsImages
+		}
+	}
+	return true
 }

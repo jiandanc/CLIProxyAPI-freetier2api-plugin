@@ -11,8 +11,32 @@ import (
 	"strings"
 )
 
-// newHexID 生成 32 位十六进制随机 ID（与官方客户端的 messageId 形态一致）。
+// NewHexID 生成 32 位十六进制随机 ID（与官方客户端的 messageId 形态一致）。
+func NewHexID() string {
+	return RandomHex(16)
+}
+
 func newHexID() string {
+	return NewHexID()
+}
+
+// RandomHex 生成 n 字节的随机十六进制串。
+func RandomHex(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	buf := make([]byte, n)
+	if _, errRand := rand.Read(buf); errRand != nil {
+		sum := sha256.Sum256([]byte(fmt.Sprintf("fallback-%d", nextFallbackSeed())))
+		if n > len(sum) {
+			n = len(sum)
+		}
+		return hex.EncodeToString(sum[:n])
+	}
+	return hex.EncodeToString(buf)
+}
+
+func oldHexIDInternal() string {
 	buf := make([]byte, 16)
 	if _, errRand := rand.Read(buf); errRand != nil {
 		// crypto/rand 失败极罕见；退回时间派生值也比返回空串安全——

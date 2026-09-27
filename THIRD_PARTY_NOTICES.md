@@ -29,7 +29,7 @@
 | `internal/cb/toolpair.go` | `internal/upstream/tool_pairing.go`、`truncation.go` | 保留重排、孤儿裁剪与截断丢弃逻辑 |
 | `internal/cb/sse.go` | `internal/upstream/sse.go` | 保留白名单重建与聚合；分帧改为「裸 JSON」（由宿主补 `data:` 与 `[DONE]`） |
 | `internal/cb/sanitize.go` | `internal/upstream/sanitize.go` | 规则外置为 `sanitize_rules.json`（便于审计改动过的字面量） |
-| `internal/cb/catalog*.go`、`catalog_seed.json`、`model.json` | `internal/upstream/model_catalog.go`、`global_models.go`、`context_catalog.go`、`effort_catalog.go`、`model.json` | 保留多路探测与四级查找链；静态表转为内嵌 JSON |
+| `internal/cb/catalog*.go`、`catalog_seed.json` | `internal/upstream/model_catalog.go`、`global_models.go`、`context_catalog.go`、`effort_catalog.go` | 保留多路探测与四级查找链；静态表转为内嵌 JSON |
 | `internal/cb/growth.go`、`activity.go`、`desktop.go`、`report.go` | `internal/upstream/tasks.go`、`streak.go`、`travel.go`、`school.go`、`blackcat.go`、`desktop.go`、`report.go`、`trial.go`、`global_register.go` | 保留全部端点、事件链与节流参数 |
 | `internal/tasks/` | `internal/panel/autotask.go`、`internal/scheduler/` | 保留 17 个任务的动作与依赖序、四套指纹、异步计分轮询与幂等规则 |
 | `prompt_default.md` | `internal/prompt/defaultprompt.md` | 原文件 |

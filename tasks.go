@@ -118,9 +118,9 @@ func runModelChat(ctx context.Context, client *cb.Client, credential *cb.Credent
 // runRichMeow 上报桌面对话事件链（6 事件）。
 func runRichMeow(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
 	conversationID := fmt.Sprintf("wb2api-meow-%d", nowUnixMs())
-	requestID := newHexID()
+	requestID := cb.NewHexID()
 	events := withDesktopFingerprint(credential,
-		tasks.DesktopChatSequence(conversationID, requestID, newHexID(), "fast-model", "fast-model"))
+		tasks.DesktopChatSequence(conversationID, requestID, cb.NewHexID(), "fast-model", "fast-model"))
 	if errReport := client.ReportDesktopEvents(ctx, credential, events); errReport != nil {
 		return "", errReport
 	}
@@ -164,7 +164,7 @@ func runTemplateUse(ctx context.Context, client *cb.Client, credential *cb.Crede
 	}
 	for _, template := range templates {
 		conversationID := fmt.Sprintf("wb2api-tpl-%d-%s", nowUnixMs(), template.id)
-		requestID := newHexID()
+		requestID := cb.NewHexID()
 		events := withDesktopFingerprint(credential,
 			tasks.DesktopTemplateUseSequence(conversationID, requestID, template.id, template.name))
 		if errReport := client.ReportDesktopEvents(ctx, credential, events); errReport != nil {
@@ -193,7 +193,7 @@ func runPlaybookPrompt(ctx context.Context, client *cb.Client, credential *cb.Cr
 // runDesignCanvas 上报设计画布创建事件组。
 func runDesignCanvas(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
 	conversationID := fmt.Sprintf("wb2api-canvas-%d", nowUnixMs())
-	requestID := newHexID()
+	requestID := cb.NewHexID()
 	events := withDesktopFingerprint(credential,
 		tasks.DesktopDesignCanvasSequence(conversationID, requestID))
 	if errReport := client.ReportDesktopEvents(ctx, credential, events); errReport != nil {
@@ -303,7 +303,7 @@ func runExpertLighthouse(ctx context.Context, client *cb.Client, credential *cb.
 	const expertName = "轻量云专家"
 	conversationID := fmt.Sprintf("wb2api-lighthouse-%d", nowUnixMs())
 
-	created := tasks.DesktopChatSequence(conversationID, newHexID(), newHexID(), "fast-model", "fast-model")
+	created := tasks.DesktopChatSequence(conversationID, cb.NewHexID(), cb.NewHexID(), "fast-model", "fast-model")
 	if len(created) > 0 {
 		created[0]["has_expert"] = true
 		created[0]["expert_id"] = expertID

@@ -192,49 +192,81 @@ func TestModelsForAuthIsolatesRealms(t *testing.T) {
 	host.addAccount("1", "cn-account", sampleCredentialJSON("cn", "cn1"))
 	host.addAccount("2", "global-account", sampleCredentialJSON("global", "g1"))
 	host.setUpstream(func(method, url, body string) fakeUpstreamResponse {
-		// 模型目录探测：返回两个域共有的模型名。
-		if strings.Contains(url, "/v3/config") {
+		if (strings.Contains(url, "codebuddy.cn") || strings.Contains(url, "copilot.tencent.com")) && strings.Contains(url, "/v3/config") {
 			return fakeUpstreamResponse{
 				Status: http.StatusOK,
-				Body:   `{"code":0,"data":{"models":[{"id":"glm-5.2","name":"GLM-5.2","maxInputTokens":1000000,"maxOutputTokens":131072}]}}`,
+				Body:   `{"code":0,"data":{"models":[{"id":"glm-5.2","name":"GLM-5.2"},{"id":"cn-exclusive","name":"CN Exclusive"}]}}`,
+			}
+		}
+		if strings.Contains(url, "workbuddy.ai") && strings.Contains(url, "/v3/config") {
+			return fakeUpstreamResponse{
+				Status: http.StatusOK,
+				Body:   `{"code":0,"data":{"models":[{"id":"glm-5.2","name":"GLM-5.2"},{"id":"global-exclusive","name":"Global Exclusive"}]}}`,
 			}
 		}
 		return fakeUpstreamResponse{Status: http.StatusNotFound, Body: `{"code":404}`}
 	})
 
-	for _, testCase := range []struct {
-		authIndex string
-		wantID    string
-		denyID    string
-	}{
-		{"1", "cn:glm-5.2", "global:glm-5.2"},
-		{"2", "global:glm-5.2", "cn:glm-5.2"},
-	} {
-		t.Run(testCase.wantID, func(t *testing.T) {
-			result := callMethod(t, pluginabi.MethodModelForAuth, pluginapi.AuthModelRequest{AuthID: testCase.authIndex})
-			var response pluginapi.ModelResponse
-			if errUnmarshal := json.Unmarshal(result, &response); errUnmarshal != nil {
-				t.Fatalf("decode model response: %v", errUnmarshal)
-			}
-			if response.Provider != providerKey {
-				t.Fatalf("provider = %q, want %q", response.Provider, providerKey)
-			}
-			ids := make([]string, 0, len(response.Models))
-			for _, model := range response.Models {
-				ids = append(ids, model.ID)
-			}
-			if !containsString(ids, testCase.wantID) {
-				t.Fatalf("models = %v, want to contain %q", ids, testCase.wantID)
-			}
-			if containsString(ids, testCase.denyID) {
-				t.Fatalf("models = %v must NOT contain %q (cross-realm leak)", ids, testCase.denyID)
-			}
-		})
+	// 测试 1：国内凭证拿到裸名 glm-5.2 与 cn-exclusive，绝不拿到 global-exclusive
+	res1 := callMethod(t, pluginabi.MethodModelForAuth, pluginapi.AuthModelRequest{AuthID: "1"})
+	var resp1 pluginapi.ModelResponse
+	_ = json.Unmarshal(res1, &resp1)
+	var ids1 []string
+	for _, m := range resp1.Models {
+		ids1 = append(ids1, m.ID)
+	}
+	if !containsString(ids1, "glm-5.2") || !containsString(ids1, "cn-exclusive") {
+		t.Fatalf("cn auth missing models: %v", ids1)
+	}
+	if containsString(ids1, "global-exclusive") {
+		t.Fatalf("cn auth must NOT contain global-exclusive: %v", ids1)
+	}
+
+	// 测试 2：海外凭证拿到裸名 glm-5.2 与 global-exclusive，绝不拿到 cn-exclusive
+	res2 := callMethod(t, pluginabi.MethodModelForAuth, pluginapi.AuthModelRequest{AuthID: "2"})
+	var resp2 pluginapi.ModelResponse
+	_ = json.Unmarshal(res2, &resp2)
+	var ids2 []string
+	for _, m := range resp2.Models {
+		ids2 = append(ids2, m.ID)
+	}
+	if !containsString(ids2, "glm-5.2") || !containsString(ids2, "global-exclusive") {
+		t.Fatalf("global auth missing models: %v", ids2)
+	}
+	if containsString(ids2, "cn-exclusive") {
+		t.Fatalf("global auth must NOT contain cn-exclusive: %v", ids2)
+	}
+
+	// 测试 3：按域独立禁用：禁用 cn:glm-5.2 后，国内凭证失去 glm-5.2，海外凭证依然拥有 glm-5.2
+	handleModelsToggle(pluginapi.ManagementRequest{
+		Method: "POST", Path: "/models/toggle",
+		Body: []byte(`{"models":["cn:glm-5.2"],"disabled":true}`),
+	})
+	res1After := callMethod(t, pluginabi.MethodModelForAuth, pluginapi.AuthModelRequest{AuthID: "1"})
+	var resp1After pluginapi.ModelResponse
+	_ = json.Unmarshal(res1After, &resp1After)
+	var ids1After []string
+	for _, m := range resp1After.Models {
+		ids1After = append(ids1After, m.ID)
+	}
+	if containsString(ids1After, "glm-5.2") {
+		t.Fatalf("cn auth must not contain disabled cn:glm-5.2, got: %v", ids1After)
+	}
+
+	res2After := callMethod(t, pluginabi.MethodModelForAuth, pluginapi.AuthModelRequest{AuthID: "2"})
+	var resp2After pluginapi.ModelResponse
+	_ = json.Unmarshal(res2After, &resp2After)
+	var ids2After []string
+	for _, m := range resp2After.Models {
+		ids2After = append(ids2After, m.ID)
+	}
+	if !containsString(ids2After, "glm-5.2") {
+		t.Fatalf("global auth should still contain glm-5.2 after disabling only cn: %v", ids2After)
 	}
 }
 
-// TestStaticModelsCarryRealmPrefixes 验证静态目录带 realm 前缀与元数据。
-func TestStaticModelsCarryRealmPrefixes(t *testing.T) {
+// TestStaticModelsBareAndMerged 验证静态目录为裸模型名且同名自动去重合并。
+func TestStaticModelsBareAndMerged(t *testing.T) {
 	host := installFakeHost(t)
 	setupTestPlugin(t)
 	host.setUpstream(func(method, url, body string) fakeUpstreamResponse {
@@ -255,24 +287,25 @@ func TestStaticModelsCarryRealmPrefixes(t *testing.T) {
 	if errUnmarshal := json.Unmarshal(result, &response); errUnmarshal != nil {
 		t.Fatalf("decode static models: %v", errUnmarshal)
 	}
-	byID := map[string]pluginapi.ModelInfo{}
+	countGLM := 0
+	var glmModel pluginapi.ModelInfo
 	for _, model := range response.Models {
-		byID[model.ID] = model
+		if model.ID == "glm-5.2" {
+			countGLM++
+			glmModel = model
+		}
+		if strings.HasPrefix(model.ID, "cn:") || strings.HasPrefix(model.ID, "global:") {
+			t.Fatalf("model ID must be bare, got %q", model.ID)
+		}
 	}
-	for _, wantID := range []string{"cn:glm-5.2", "global:glm-5.2"} {
-		model, okModel := byID[wantID]
-		if !okModel {
-			t.Fatalf("static models missing %q (have %v)", wantID, keysOf(byID))
-		}
-		if model.ContextLength != 1000000 {
-			t.Fatalf("%s context_length = %d, want 1000000", wantID, model.ContextLength)
-		}
-		if model.Thinking == nil || len(model.Thinking.Levels) == 0 {
-			t.Fatalf("%s must expose reasoning levels", wantID)
-		}
-		if !strings.Contains(model.Description, "credit") {
-			t.Fatalf("%s description should carry the credits prefix: %q", wantID, model.Description)
-		}
+	if countGLM != 1 {
+		t.Fatalf("glm-5.2 must be merged into exactly 1 model entry, got %d", countGLM)
+	}
+	if glmModel.ContextLength != 1000000 {
+		t.Fatalf("glm-5.2 context_length = %d, want 1000000", glmModel.ContextLength)
+	}
+	if glmModel.Thinking == nil || len(glmModel.Thinking.Levels) == 0 {
+		t.Fatal("glm-5.2 must expose reasoning levels")
 	}
 }
 
@@ -467,4 +500,113 @@ func keysOf(source map[string]pluginapi.ModelInfo) []string {
 		out = append(out, key)
 	}
 	return out
+}
+
+// TestQuotaResetDomesticAndGlobal 验证国内版账号可签到重置额度，国际版被正确拒绝。
+func TestQuotaResetDomesticAndGlobal(t *testing.T) {
+	host := installFakeHost(t)
+	setupTestPlugin(t)
+
+	host.addAccount("1", "cn-account", sampleCredentialJSON("cn", "cn1"))
+	host.addAccount("2", "global-account", sampleCredentialJSON("global", "g1"))
+	host.setUpstream(func(method, url, body string) fakeUpstreamResponse {
+		if strings.Contains(url, "daily-checkin") {
+			return fakeUpstreamResponse{
+				Status: http.StatusOK,
+				Body:   `{"code":0,"data":{"credit":10,"energy":5,"streak":3}}`,
+			}
+		}
+		return fakeUpstreamResponse{Status: http.StatusNotFound, Body: `{"code":404}`}
+	})
+
+	// 国际版账号重置应被拦截并提示
+	resGlobal := callMethod(t, pluginabi.MethodQuotaReset, pluginapi.QuotaResetRequest{AuthID: "2"})
+	var respGlobal pluginapi.QuotaResetResponse
+	if errUnmarshal := json.Unmarshal(resGlobal, &respGlobal); errUnmarshal != nil {
+		t.Fatalf("decode global quota reset: %v", errUnmarshal)
+	}
+	if respGlobal.Success {
+		t.Fatal("global account quota reset must not succeed via checkin")
+	}
+
+	// 国内版账号重置应成功执行签到
+	resCN := callMethod(t, pluginabi.MethodQuotaReset, pluginapi.QuotaResetRequest{AuthID: "1"})
+	var respCN pluginapi.QuotaResetResponse
+	if errUnmarshal := json.Unmarshal(resCN, &respCN); errUnmarshal != nil {
+		t.Fatalf("decode cn quota reset: %v", errUnmarshal)
+	}
+	if !respCN.Success {
+		t.Fatalf("cn account quota reset should succeed, message: %s", respCN.Message)
+	}
+}
+
+// TestManagementAutoAllRouteDispatched 验证 /tasks/auto_all 路由分发成功且不报 404。
+func TestManagementAutoAllRouteDispatched(t *testing.T) {
+	installFakeHost(t)
+	setupTestPlugin(t)
+
+	raw, err := handleMethod(pluginabi.MethodManagementHandle, mustMarshal(pluginapi.ManagementRequest{
+		Method: "POST",
+		Path:   "/v0/management/plugins/workbuddy2api/tasks/auto_all",
+	}))
+	if err != nil {
+		t.Fatalf("handleMethod error: %v", err)
+	}
+	var env envelope
+	_ = json.Unmarshal(raw, &env)
+	var resp pluginapi.ManagementResponse
+	_ = json.Unmarshal(env.Result, &resp)
+	if resp.StatusCode == http.StatusNotFound {
+		t.Fatalf("/tasks/auto_all must be routed, got 404: %s", string(resp.Body))
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/tasks/auto_all expected 200, got: %d", resp.StatusCode)
+	}
+}
+
+// TestPrepareBodyPromptModes 验证单 Pass 中提示词三种模式（passthrough/custom/append）及模型裸名改写。
+func TestPrepareBodyPromptModes(t *testing.T) {
+	baseJSON := []byte(`{"model":"cn:glm-5.2","messages":[{"role":"system","content":"old sys"},{"role":"user","content":"hello"}]}`)
+
+	// 1. passthrough
+	outPass := cb.PrepareBody(baseJSON, cb.PrepareOptions{
+		Model:      "glm-5.2",
+		PromptMode: "passthrough",
+		PromptText: "custom prompt",
+	})
+	var mapPass map[string]any
+	_ = json.Unmarshal(outPass, &mapPass)
+	if mapPass["model"] != "glm-5.2" {
+		t.Fatalf("model must be rewritten to bare name, got: %v", mapPass["model"])
+	}
+	msgsPass := mapPass["messages"].([]any)
+	if msgsPass[0].(map[string]any)["content"] != "old sys" {
+		t.Fatalf("passthrough should keep old sys, got: %v", msgsPass[0])
+	}
+
+	// 2. custom
+	outCustom := cb.PrepareBody(baseJSON, cb.PrepareOptions{
+		Model:      "glm-5.2",
+		PromptMode: "custom",
+		PromptText: "pure prompt",
+	})
+	var mapCustom map[string]any
+	_ = json.Unmarshal(outCustom, &mapCustom)
+	msgsCustom := mapCustom["messages"].([]any)
+	if len(msgsCustom) != 2 || msgsCustom[0].(map[string]any)["content"] != "pure prompt" {
+		t.Fatalf("custom should replace sys, got: %v", msgsCustom)
+	}
+
+	// 3. append
+	outAppend := cb.PrepareBody(baseJSON, cb.PrepareOptions{
+		Model:      "glm-5.2",
+		PromptMode: "append",
+		PromptText: "appended rule",
+	})
+	var mapAppend map[string]any
+	_ = json.Unmarshal(outAppend, &mapAppend)
+	msgsAppend := mapAppend["messages"].([]any)
+	if len(msgsAppend) != 3 || msgsAppend[1].(map[string]any)["content"] != "appended rule" {
+		t.Fatalf("append should insert prompt after leading sys, got: %v", msgsAppend)
+	}
 }

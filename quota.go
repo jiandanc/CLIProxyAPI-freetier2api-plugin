@@ -59,7 +59,7 @@ func handleQuotaReset(request []byte) ([]byte, error) {
 	if errCredential != nil {
 		return nil, newPluginError("workbuddy_credential_missing", errCredential.Error(), http.StatusUnauthorized)
 	}
-	if !credential.Realm().IsGlobal() {
+	if credential.Realm().IsGlobal() {
 		return okEnvelope(pluginapi.QuotaResetResponse{
 			Success: false,
 			Message: "每日签到仅国内版账号提供；国际版账号无签到活动，额度按周期自动重置",

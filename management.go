@@ -49,6 +49,7 @@ func managementRegistration() pluginapi.ManagementRegistrationResponse {
 			{Method: "POST", Path: managementRoutePrefix + "/tasks/run", Description: "执行任务队列（账号内串行、账号间并发）。"},
 			{Method: "GET", Path: managementRoutePrefix + "/tasks/queue", Description: "查询任务队列进度。"},
 			{Method: "POST", Path: managementRoutePrefix + "/tasks/auto", Description: "对单个账号执行单个任务或一键完成。"},
+			{Method: "POST", Path: managementRoutePrefix + "/tasks/auto_all", Description: "对全部账号依次执行一键完成任务。"},
 			{Method: "GET", Path: managementRoutePrefix + "/school/status", Description: "开学季活动状态。"},
 			{Method: "POST", Path: managementRoutePrefix + "/school/run", Description: "执行开学季闭环。"},
 			{Method: "POST", Path: managementRoutePrefix + "/travel", Description: "手动执行猫猫旅行。"},
@@ -122,6 +123,9 @@ func handleManagement(request []byte) ([]byte, error) {
 
 	case method == http.MethodGet && matchesManagementPath(rpc.Path, "/tasks/queue"):
 		return okEnvelope(jsonResponse(http.StatusOK, taskQueueSnapshot()))
+
+	case method == http.MethodPost && matchesManagementPath(rpc.Path, "/tasks/auto_all"):
+		return okEnvelope(handleTasksAutoAll(rpc))
 
 	case method == http.MethodPost && matchesManagementPath(rpc.Path, "/tasks/auto"):
 		return okEnvelope(handleTasksAuto(rpc))
@@ -243,18 +247,6 @@ func errorResponse(err error) pluginapi.ManagementResponse {
 	return jsonResponse(status, map[string]any{"error": message, "ok": false})
 }
 
-// managementBody 解析管理请求的 JSON body（空 body 返回空 map）。
-func managementBody(req pluginapi.ManagementRequest) map[string]any {
-	if len(req.Body) == 0 {
-		return map[string]any{}
-	}
-	payload := decodeJSONMap(req.Body)
-	if payload == nil {
-		return map[string]any{}
-	}
-	return payload
-}
-
 // consoleModel 是控制台页展示用的模型条目。
 //
 // 刻意**自定义**而不直接回传 pluginapi.ModelInfo：宿主对插件的管理响应是原样
@@ -263,6 +255,8 @@ func managementBody(req pluginapi.ManagementRequest) map[string]any {
 // 表现成一屏的 "--"。这里显式声明契约，两端一致。
 type consoleModel struct {
 	ID              string   `json:"id"`
+	ScopeID         string   `json:"scope_id"`
+	Realm           string   `json:"realm"`
 	Name            string   `json:"name,omitempty"`
 	Description     string   `json:"description,omitempty"`
 	ContextLength   int64    `json:"context_length,omitempty"`
@@ -290,8 +284,11 @@ func handleModelsList(req pluginapi.ManagementRequest) pluginapi.ManagementRespo
 			continue
 		}
 		for _, model := range cached[region] {
+			scopeID := PrefixModelID(region, model.ID)
 			models = append(models, consoleModel{
-				ID:              PrefixModelID(region, model.ID),
+				ID:              model.ID,
+				ScopeID:         scopeID,
+				Realm:           string(region),
 				Name:            model.Name,
 				Description:     model.Description,
 				ContextLength:   model.ContextWindow,
@@ -306,8 +303,12 @@ func handleModelsList(req pluginapi.ManagementRequest) pluginapi.ManagementRespo
 	}
 	// 额外注册的模型（配置里的 extra_models）也一并展示。
 	for _, extra := range extraModels(cfg) {
+		r, bare := SplitModelID(extra.ID)
+		region := cb.NormalizeRegion(r)
 		models = append(models, consoleModel{
-			ID:            extra.ID,
+			ID:            bare,
+			ScopeID:       PrefixModelID(region, bare),
+			Realm:         string(region),
 			Name:          firstNonEmptyString(extra.DisplayName, extra.Name),
 			ContextLength: extra.ContextLength,
 		})
@@ -351,7 +352,7 @@ func buildStatusPayload(req pluginapi.ManagementRequest) map[string]any {
 		"plugin":            pluginID,
 		"version":           effectivePluginVersion(),
 		"enabled_realms":    cfg.EnabledRealms,
-		"prompt_mode":       cfg.PromptMode,
+		"prompt_mode":       promptModeFor(),
 		"log_level":         logger.CurrentLevel(),
 		"state_dir":         cfg.StateDir,
 		"accounts":          accounts,
@@ -502,13 +503,19 @@ func queryInt64(query map[string][]string, key string, fallback int64) int64 {
 }
 
 // handleCheckinRequest 对指定或全部账号执行签到。
+type accountBatchRequest struct {
+	AccountIDs []string `json:"account_ids"`
+}
+
 func handleCheckinRequest(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
-	body := managementBody(req)
-	targets := stringSliceField(body, "account_ids")
+	var body accountBatchRequest
+	if len(req.Body) > 0 {
+		_ = json.Unmarshal(req.Body, &body)
+	}
 	ctx, cancel := managementContext(req)
 	defer cancel()
 
-	results := runForAccounts(ctx, hostCallbackID(req), targets, func(ctx context.Context, credential *cb.Credential) (string, error) {
+	results := runForAccounts(ctx, hostCallbackID(req), body.AccountIDs, func(ctx context.Context, credential *cb.Credential) (string, error) {
 		client := newUpstreamClient(ctx)
 		result, errCheckin := client.DailyCheckin(credential)
 		if errCheckin != nil {
@@ -567,8 +574,10 @@ type quotaResult struct {
 
 // handleQuotasRequest 批量查询额度。
 func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
-	body := managementBody(req)
-	targets := stringSliceField(body, "account_ids")
+	var body accountBatchRequest
+	if len(req.Body) > 0 {
+		_ = json.Unmarshal(req.Body, &body)
+	}
 	ctx, cancel := managementContext(req)
 	defer cancel()
 	callbackID := hostCallbackID(req)
@@ -580,8 +589,8 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 			"error": "读取账号列表失败：" + errList.Error(),
 		})
 	}
-	wanted := make(map[string]bool, len(targets))
-	for _, target := range targets {
+	wanted := make(map[string]bool, len(body.AccountIDs))
+	for _, target := range body.AccountIDs {
 		wanted[strings.TrimSpace(target)] = true
 	}
 
@@ -590,6 +599,7 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 		entry      hostAuthEntry
 		credential *cb.Credential
 	}
+	var preResults []quotaResult
 	jobs := make([]job, 0, len(entries))
 	for _, entry := range entries {
 		if entry.Disabled || entry.Unavailable {
@@ -598,18 +608,46 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 		if len(wanted) > 0 && !wanted[entry.ID] && !wanted[entry.Name] && !wanted[entry.AuthIndex] {
 			continue
 		}
-		raw, okRaw := getAuthJSONByIndex(ctx, callbackID, entry.AuthIndex)
-		if !okRaw {
+		var raw []byte
+		if entry.AuthIndex != "" {
+			if r, ok := getAuthJSONByIndex(ctx, callbackID, entry.AuthIndex); ok {
+				raw = r
+			}
+		}
+		if len(raw) == 0 && entry.Path != "" {
+			if r, err := os.ReadFile(entry.Path); err == nil && len(r) > 0 {
+				raw = r
+			}
+		}
+		if len(raw) == 0 {
+			targetID := firstNonEmptyString(entry.AuthIndex, entry.ID, entry.Name)
+			if r, err := fetchAuthJSON(ctx, callbackID, targetID); err == nil && len(r) > 0 {
+				raw = r
+			}
+		}
+		if len(raw) == 0 {
+			preResults = append(preResults, quotaResult{
+				AuthID:  firstNonEmptyString(entry.ID, entry.Name),
+				Label:   firstNonEmptyString(entry.Label, entry.Name, entry.ID),
+				OK:      false,
+				Message: "凭证读取失败",
+			})
 			continue
 		}
 		credential, errParse := cb.ParseCredential(raw, defaultRealmForParse(cfg))
 		if errParse != nil {
+			preResults = append(preResults, quotaResult{
+				AuthID:  firstNonEmptyString(entry.ID, entry.Name),
+				Label:   firstNonEmptyString(entry.Label, entry.Name, entry.ID),
+				OK:      false,
+				Message: "凭证解析失败: " + errParse.Error(),
+			})
 			continue
 		}
 		jobs = append(jobs, job{entry: entry, credential: credential})
 	}
 
-	results := make([]quotaResult, len(jobs))
+	jobResults := make([]quotaResult, len(jobs))
 	semaphore := make(chan struct{}, managementBatchConcurrency)
 	done := make(chan int, len(jobs))
 	for index := range jobs {
@@ -632,14 +670,15 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 				result.Total = balance.Total
 				result.Packages = summarizePackages(balance)
 			}
-			results[slot] = result
+			jobResults[slot] = result
 			done <- slot
 		}(index)
 	}
 	for range jobs {
 		<-done
 	}
-	return jsonResponse(http.StatusOK, map[string]any{"ok": true, "results": results})
+	finalResults := append(preResults, jobResults...)
+	return jsonResponse(http.StatusOK, map[string]any{"ok": true, "results": finalResults})
 }
 
 // summarizePackages 把资源包明细压成一行文字（供表格展示）。
@@ -749,44 +788,61 @@ func runForAccounts(ctx context.Context, callbackID string, targets []string, ac
 }
 
 // handleSettingsRequest 更新插件运行期设置。
+type settingsUpdateRequest struct {
+	AutoCheckin    *bool  `json:"auto_checkin"`
+	AutoCheckinAt  string `json:"auto_checkin_at"`
+	AutoTasks      *bool  `json:"auto_tasks"`
+	PromptMode     string `json:"prompt_mode"`
+	CheckinHours   []int  `json:"checkin_hours"`
+	TravelHours    []int  `json:"travel_hours"`
+	ActivityHours  []int  `json:"activity_hours"`
+	KeepaliveHours []int  `json:"keepalive_hours"`
+	BlackcatHours  []int  `json:"blackcat_hours"`
+}
+
 func handleSettingsRequest(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
-	body := managementBody(req)
+	var body settingsUpdateRequest
+	if len(req.Body) > 0 {
+		_ = json.Unmarshal(req.Body, &body)
+	}
 	changed := map[string]any{}
 
 	mutateState(func(state *pluginState) {
-		if raw, okRaw := body["auto_checkin"]; okRaw {
-			if value, okValue := raw.(bool); okValue {
-				state.AutoCheckin = &value
-				changed["auto_checkin"] = value
+		if body.AutoCheckin != nil {
+			state.AutoCheckin = body.AutoCheckin
+			changed["auto_checkin"] = *body.AutoCheckin
+		}
+		if at := strings.TrimSpace(body.AutoCheckinAt); at != "" {
+			if _, _, errClock := parseClock(at); errClock == nil {
+				state.AutoCheckinAt = at
+				changed["auto_checkin_at"] = at
 			}
 		}
-		if raw, okRaw := body["auto_checkin_at"].(string); okRaw && strings.TrimSpace(raw) != "" {
-			if _, _, errClock := parseClock(raw); errClock != nil {
-				return
-			}
-			state.AutoCheckinAt = strings.TrimSpace(raw)
-			changed["auto_checkin_at"] = state.AutoCheckinAt
+		if body.AutoTasks != nil {
+			state.AutoTasks = body.AutoTasks
+			changed["auto_tasks"] = *body.AutoTasks
 		}
-		if raw, okRaw := body["auto_tasks"]; okRaw {
-			if value, okValue := raw.(bool); okValue {
-				state.AutoTasks = &value
-				changed["auto_tasks"] = value
+		if mode := strings.ToLower(strings.TrimSpace(body.PromptMode)); mode != "" {
+			switch mode {
+			case "passthrough", "custom", "append":
+				state.PromptMode = &mode
+				changed["prompt_mode"] = mode
 			}
 		}
-		// 任务排程：五组整点小时列表。
-		for key, target := range map[string]*[]int{
-			"checkin_hours":   &state.CheckinHours,
-			"travel_hours":    &state.TravelHours,
-			"activity_hours":  &state.ActivityHours,
-			"keepalive_hours": &state.KeepaliveHours,
-			"blackcat_hours":  &state.BlackcatHours,
+		for key, pair := range map[string]struct {
+			hours []int
+			dest  *[]int
+		}{
+			"checkin_hours":   {body.CheckinHours, &state.CheckinHours},
+			"travel_hours":    {body.TravelHours, &state.TravelHours},
+			"activity_hours":  {body.ActivityHours, &state.ActivityHours},
+			"keepalive_hours": {body.KeepaliveHours, &state.KeepaliveHours},
+			"blackcat_hours":  {body.BlackcatHours, &state.BlackcatHours},
 		} {
-			hours, okHours := intSliceField(body, key)
-			if !okHours {
-				continue
+			if len(pair.hours) > 0 {
+				*pair.dest = pair.hours
+				changed[key] = pair.hours
 			}
-			*target = hours
-			changed[key] = hours
 		}
 	})
 
@@ -942,54 +998,4 @@ func handleSchoolStatus(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 	defer cancel()
 	statuses := schoolStatusForAccounts(ctx, hostCallbackID(req))
 	return jsonResponse(http.StatusOK, map[string]any{"ok": true, "accounts": statuses})
-}
-
-// stringSliceField 从 body 里取字符串数组字段。
-func stringSliceField(body map[string]any, key string) []string {
-	raw, okRaw := body[key]
-	if !okRaw {
-		return nil
-	}
-	switch typed := raw.(type) {
-	case []any:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if text, okText := item.(string); okText && strings.TrimSpace(text) != "" {
-				out = append(out, strings.TrimSpace(text))
-			}
-		}
-		return out
-	case string:
-		return splitList(typed)
-	}
-	return nil
-}
-
-// intSliceField 从 body 里取整数数组字段。
-func intSliceField(body map[string]any, key string) ([]int, bool) {
-	raw, okRaw := body[key]
-	if !okRaw {
-		return nil, false
-	}
-	items, okItems := raw.([]any)
-	if !okItems {
-		return nil, false
-	}
-	out := make([]int, 0, len(items))
-	for _, item := range items {
-		switch typed := item.(type) {
-		case float64:
-			hour := int(typed)
-			if hour < 0 || hour > 23 {
-				return nil, false
-			}
-			out = append(out, hour)
-		case int:
-			if typed < 0 || typed > 23 {
-				return nil, false
-			}
-			out = append(out, typed)
-		}
-	}
-	return out, true
 }

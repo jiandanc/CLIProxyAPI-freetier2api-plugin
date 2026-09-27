@@ -12,6 +12,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -323,17 +324,26 @@ func taskQueueSnapshot() map[string]any {
 }
 
 // handleTasksRun 启动任务队列。
+type taskRunRequest struct {
+	Concurrency int  `json:"concurrency"`
+	Growth      bool `json:"growth"`
+	School      bool `json:"school"`
+}
+
 func handleTasksRun(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
-	body := managementBody(req)
-	concurrency := int(numberField(body, "concurrency", 1))
+	body := taskRunRequest{Concurrency: 1, Growth: true, School: true}
+	if len(req.Body) > 0 {
+		_ = json.Unmarshal(req.Body, &body)
+	}
+	concurrency := body.Concurrency
 	if concurrency < 1 {
 		concurrency = 1
 	}
 	if concurrency > queueMaxConcurrency {
 		concurrency = queueMaxConcurrency
 	}
-	runGrowth := boolField(body, "growth", true)
-	runSchool := boolField(body, "school", true)
+	runGrowth := body.Growth
+	runSchool := body.School
 	if !runGrowth && !runSchool {
 		runGrowth, runSchool = true, true
 	}
@@ -566,13 +576,31 @@ func acceptPendingTasks(ctx context.Context, account *accountContext) int {
 	return accepted
 }
 
-// runGrowthTask 执行单个成长任务（含回读与自动领奖）。
+// runGrowthTask 执行单个成长任务（含达标预检、执行与自动领奖）。
 func runGrowthTask(ctx context.Context, account *accountContext, code string) (string, int64, int64, error) {
 	action := autoActionFor(code)
 	if action == nil {
 		return "", 0, 0, fmt.Errorf("该任务没有对应的自动动作（可能需要客户端内交互）")
 	}
 	client := newUpstreamClient(ctx)
+
+	// 达标预检：如果任务已经完成/达标，直接尝试领奖，绝不再重新执行动作（避免重复消耗额度）。
+	task, errTask := findGrowthTask(ctx, client, account.credential, code)
+	if errTask == nil && task != nil {
+		if task.Claimed {
+			recordTaskResult(account.uid(), code, "任务已完成且已领奖", "done", 0, 0)
+			return "任务已完成且已领奖", 0, 0, nil
+		}
+		if task.Done() {
+			credit, energy := claimGrowthReward(ctx, client, account.credential, code)
+			msg := "任务已达标（跳过重复执行）"
+			if credit > 0 || energy > 0 {
+				msg = fmt.Sprintf("任务已达标，已领奖 +%d 积分 +%d 能量", credit, energy)
+			}
+			recordTaskResult(account.uid(), code, msg, "done", credit, energy)
+			return msg, credit, energy, nil
+		}
+	}
 
 	message, errRun := action.Run(ctx, client, account.credential)
 	if errRun != nil {
@@ -692,10 +720,20 @@ func recordTaskResult(uid, code, message, status string, credit, energy int64) {
 }
 
 // handleTasksAuto 对单个账号执行单个任务或一键完成。
+type taskAutoRequest struct {
+	AuthID    string `json:"auth_id"`
+	UID       string `json:"uid"`
+	AccountID string `json:"account_id"`
+	TaskCode  string `json:"task_code"`
+}
+
 func handleTasksAuto(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
-	body := managementBody(req)
-	authID := firstNonEmptyString(stringFieldOf(body, "auth_id"), stringFieldOf(body, "uid"), stringFieldOf(body, "account_id"))
-	code := strings.TrimSpace(stringFieldOf(body, "task_code"))
+	var body taskAutoRequest
+	if len(req.Body) > 0 {
+		_ = json.Unmarshal(req.Body, &body)
+	}
+	authID := firstNonEmptyString(body.AuthID, body.UID, body.AccountID)
+	code := strings.TrimSpace(body.TaskCode)
 
 	ctx, cancel := managementContext(req)
 	defer cancel()
@@ -952,38 +990,7 @@ func schoolStatusForAccounts(ctx context.Context, callbackID string) []map[strin
 	}
 	waitGroup.Wait()
 	sort.Slice(out, func(i, j int) bool {
-		return stringField(out[i], "label") < stringField(out[j], "label")
+		return fmt.Sprint(out[i]["label"]) < fmt.Sprint(out[j]["label"])
 	})
 	return out
-}
-
-// stringFieldOf 从 body 取字符串字段。
-func stringFieldOf(body map[string]any, key string) string {
-	value, _ := body[key].(string)
-	return strings.TrimSpace(value)
-}
-
-// numberField 从 body 取数值字段。
-func numberField(body map[string]any, key string, fallback float64) float64 {
-	switch typed := body[key].(type) {
-	case float64:
-		return typed
-	case int:
-		return float64(typed)
-	}
-	return fallback
-}
-
-// boolField 从 body 取布尔字段。
-func boolField(body map[string]any, key string, fallback bool) bool {
-	if value, okValue := body[key].(bool); okValue {
-		return value
-	}
-	return fallback
-}
-
-// stringField 从 map 取字符串字段（供排序比较）。
-func stringField(source map[string]any, key string) string {
-	value, _ := source[key].(string)
-	return value
 }

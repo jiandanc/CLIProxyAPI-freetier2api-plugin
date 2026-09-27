@@ -3,6 +3,7 @@ package main
 // 本文件实现模型 ID 的 realm 前缀协议与错误语义映射。
 
 import (
+	"errors"
 	"strings"
 
 	"workbuddy2api-plugin/cpasdk/pluginapi"
@@ -47,7 +48,7 @@ func PrefixModelID(region cb.Region, bareModel string) string {
 //
 // functionCalling 与 reasoning 的档位会一并透出，客户端据此渲染能力提示。
 func ModelInfoToPluginAPI(region cb.Region, model cb.ModelInfo) pluginapi.ModelInfo {
-	id := PrefixModelID(region, model.ID)
+	id := strings.TrimSpace(model.ID)
 	name := strings.TrimSpace(model.Name)
 	if name == "" {
 		name = model.ID
@@ -96,9 +97,6 @@ func describeModel(region cb.Region, model cb.ModelInfo) string {
 	credits = strings.TrimSuffix(credits, "credit")
 	credits = strings.TrimSuffix(credits, "credits")
 	prefix := "[" + strings.TrimSpace(credits) + " credit] "
-	if region.IsGlobal() {
-		prefix = "[" + strings.TrimSpace(credits) + " credit] "
-	}
 	return prefix + description
 }
 
@@ -128,12 +126,12 @@ func asUpstreamError(err error, target **cb.Error) bool {
 	if err == nil {
 		return false
 	}
-	converted, okConverted := err.(*cb.Error)
-	if !okConverted {
-		return false
+	var upstreamErr *cb.Error
+	if errors.As(err, &upstreamErr) {
+		*target = upstreamErr
+		return true
 	}
-	*target = converted
-	return true
+	return false
 }
 
 // RealmForRequest 决定一次请求实际使用的域。

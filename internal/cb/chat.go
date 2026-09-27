@@ -3,7 +3,6 @@ package cb
 // 本文件实现对话调用：请求构造、出站、错误分类与流式读取。
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,18 +44,21 @@ var (
 	supportEffortMap = map[string][]string{}
 )
 
-// SetEffortTables 注入档位表（按 realm 合并后的最终结果）。
+// SetEffortTables 注入档位表并合并到全局（支持多域合并，不互相覆盖）。
 func SetEffortTables(defaults map[string]string, supported map[string][]string) {
 	effortMu.Lock()
 	defer effortMu.Unlock()
-	if defaults == nil {
-		defaults = map[string]string{}
+	for k, v := range defaults {
+		defaultEffortMap[k] = v
 	}
-	if supported == nil {
-		supported = map[string][]string{}
+	for k, v := range supported {
+		supportEffortMap[k] = v
 	}
-	defaultEffortMap = defaults
-	supportEffortMap = supported
+}
+
+// SetEffortTablesForRegion 注入指定域的档位表并合并到全局。
+func SetEffortTablesForRegion(region Region, defaults map[string]string, supported map[string][]string) {
+	SetEffortTables(defaults, supported)
 }
 
 // effortTables 读取档位表。
@@ -89,15 +91,15 @@ func (c *Client) ChatStream(req ChatRequest) (io.ReadCloser, error) {
 	cacheKey := buildCacheKey(req.Credential.UIDValue(), firstNonEmpty(conversationKey, req.Meta.ConversationRequestID))
 	defaultEfforts, supportedEfforts := effortTables()
 	prepared := PrepareBody(req.Body, PrepareOptions{
+		Model:            model,
+		PromptMode:       c.opts.PromptMode,
+		PromptText:       c.opts.PromptText,
 		Sanitize:         c.opts.SanitizeFingerprints,
 		DefaultEfforts:   defaultEfforts,
 		SupportedEfforts: supportedEfforts,
 		CacheKey:         cacheKey,
 		Global:           region.IsGlobal(),
 	})
-
-	// 出站 body 的 model 必须是不带 realm 前缀的裸名（上游不认前缀）。
-	prepared = rewriteModel(prepared, model)
 
 	endpoints := GetEndpoints(region)
 	httpReq, errReq := http.NewRequestWithContext(c.opts.Context, http.MethodPost,
@@ -115,7 +117,11 @@ func (c *Client) ChatStream(req ChatRequest) (io.ReadCloser, error) {
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, apiBodyLimit))
 		closeBody(resp.Body)
-		return nil, enrichClassifyError(resp.StatusCode, string(body), resp.Header)
+		errClassified := enrichClassifyError(resp.StatusCode, string(body), resp.Header)
+		if errClassified != nil && errClassified.Kind == KindContentBlocked && c.opts.OnContentBlocked != nil {
+			c.opts.OnContentBlocked()
+		}
+		return nil, errClassified
 	}
 	return resp.Body, nil
 }
@@ -129,22 +135,6 @@ func transientError(err error) *Error {
 		return nil
 	}
 	return &Error{Kind: KindServer, Status: 0, Msg: err.Error()}
-}
-
-// rewriteModel 把请求体里的 model 字段改成裸名。
-//
-// realm 前缀是网关侧的路由协议，上游只认裸名。
-func rewriteModel(body []byte, model string) []byte {
-	payload := decodeBodyMap(body)
-	if payload == nil {
-		return body
-	}
-	payload["model"] = model
-	encoded, errEncode := json.Marshal(payload)
-	if errEncode != nil {
-		return body
-	}
-	return encoded
 }
 
 // Chat 发起一次对话并聚合为非流式响应。

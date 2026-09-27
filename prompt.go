@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"workbuddy2api-plugin/internal/cb"
 	"workbuddy2api-plugin/internal/logger"
 )
 
@@ -58,13 +59,20 @@ func applyPromptConfig(cfg pluginConfig) {
 
 // promptTextFor 返回当前生效的提示词文本（供出站构造使用）。
 func promptTextFor(cfg pluginConfig) string {
+	if promptDegradedActive() {
+		return degradedPrompt
+	}
 	promptMu.RLock()
 	defer promptMu.RUnlock()
 	return promptText
 }
 
-// promptModeFor 返回当前生效的提示词模式。
+// promptModeFor 返回当前生效的提示词模式（页面设置覆盖 > YAML 配置）。
 func promptModeFor() string {
+	state := snapshotState()
+	if state.PromptMode != nil && strings.TrimSpace(*state.PromptMode) != "" {
+		return strings.TrimSpace(*state.PromptMode)
+	}
 	promptMu.RLock()
 	defer promptMu.RUnlock()
 	return promptMode
@@ -89,88 +97,9 @@ func promptDegradedActive() bool {
 }
 
 // ApplyPrompt 按当前模式改写请求体的 system 消息。
-//
-// 任何异常（坏 JSON、空 body、空提示词）都原样返回，绝不失败：
-// 提示词处理是优化项，不该成为请求失败的原因。
 func ApplyPrompt(body []byte) []byte {
-	mode := promptModeFor()
-	text := promptTextFor(loadedConfig())
-	if mode == promptModePassThru {
-		return body
-	}
-	if promptDegradedActive() {
-		// 降级态：无论哪种模式都换成极简提示词。
-		return rewriteSystem(body, degradedPrompt)
-	}
-	if strings.TrimSpace(text) == "" {
-		return body
-	}
-	if mode == promptModeCustom {
-		return rewriteSystem(body, text)
-	}
-	return appendSystem(body, text)
-}
-
-// rewriteSystem 删除全部 system/developer 消息并在开头插入一条新的 system。
-func rewriteSystem(body []byte, text string) []byte {
-	payload := decodeJSONMap(body)
-	if payload == nil {
-		return body
-	}
-	messages, okMessages := payload["messages"].([]any)
-	if !okMessages {
-		return body
-	}
-	kept := make([]any, 0, len(messages)+1)
-	kept = append(kept, map[string]any{"role": "system", "content": text})
-	for _, item := range messages {
-		message, okMessage := item.(map[string]any)
-		if !okMessage {
-			kept = append(kept, item)
-			continue
-		}
-		role, _ := message["role"].(string)
-		switch strings.ToLower(strings.TrimSpace(role)) {
-		case "system", "developer":
-			continue
-		}
-		kept = append(kept, message)
-	}
-	payload["messages"] = kept
-	return encodeJSONMap(payload, body)
-}
-
-// appendSystem 在开头连续的 system/developer 块之后插入一条网关 system。
-//
-// 插在块之后而不是最前面：客户端常把「身份 + 工具说明」拆成多条 system，
-// 从中间插入会破坏它们之间的上下文关系。
-func appendSystem(body []byte, text string) []byte {
-	payload := decodeJSONMap(body)
-	if payload == nil {
-		return body
-	}
-	messages, okMessages := payload["messages"].([]any)
-	if !okMessages {
-		return body
-	}
-	insertAt := 0
-	for insertAt < len(messages) {
-		message, okMessage := messages[insertAt].(map[string]any)
-		if !okMessage {
-			break
-		}
-		role, _ := message["role"].(string)
-		switch strings.ToLower(strings.TrimSpace(role)) {
-		case "system", "developer":
-			insertAt++
-			continue
-		}
-		break
-	}
-	out := make([]any, 0, len(messages)+1)
-	out = append(out, messages[:insertAt]...)
-	out = append(out, map[string]any{"role": "system", "content": text})
-	out = append(out, messages[insertAt:]...)
-	payload["messages"] = out
-	return encodeJSONMap(payload, body)
+	return cb.PrepareBody(body, cb.PrepareOptions{
+		PromptMode: promptModeFor(),
+		PromptText: promptTextFor(loadedConfig()),
+	})
 }

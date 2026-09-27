@@ -13,12 +13,13 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -336,19 +337,9 @@ func doLoginRequest(req *http.Request) (json.RawMessage, error) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body := make([]byte, 0, 4096)
-	buffer := make([]byte, 4096)
-	for {
-		read, errRead := resp.Body.Read(buffer)
-		if read > 0 {
-			body = append(body, buffer[:read]...)
-			if len(body) > 1<<20 {
-				break
-			}
-		}
-		if errRead != nil {
-			break
-		}
+	body, errRead := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if errRead != nil {
+		return nil, fmt.Errorf("read login response: %w", errRead)
 	}
 	if resp.StatusCode >= 400 {
 		return nil, cb.Classify(resp.StatusCode, string(body))
@@ -369,7 +360,7 @@ func doLoginRequest(req *http.Request) (json.RawMessage, error) {
 		return nil, &cb.Error{
 			Kind:   cb.KindClient,
 			Status: resp.StatusCode,
-			Msg:    fmt.Sprintf("%s %s", itoa(envelope.Code), strings.TrimSpace(envelope.Msg)),
+			Msg:    fmt.Sprintf("%s %s", strconv.Itoa(envelope.Code), strings.TrimSpace(envelope.Msg)),
 		}
 	}
 	if len(envelope.Data) > 0 && string(envelope.Data) != "null" {
@@ -401,8 +392,8 @@ func isLoginPending(err error) bool {
 	if err == nil {
 		return false
 	}
-	upstreamErr, okUpstream := err.(*cb.Error)
-	if !okUpstream {
+	var upstreamErr *cb.Error
+	if !errors.As(err, &upstreamErr) {
 		return false
 	}
 	if upstreamErr.Status == http.StatusNotFound {
@@ -471,11 +462,7 @@ func defaultDomainFor(region cb.Region) string {
 
 // newLoginSessionID 生成一个随机的登录会话标识。
 func newLoginSessionID() string {
-	buffer := make([]byte, 16)
-	if _, errRand := rand.Read(buffer); errRand != nil {
-		return fmt.Sprintf("s%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(buffer)
+	return cb.NewHexID()
 }
 
 // gcLoginSessionsLocked 清理过期的登录会话。调用方必须持有 loginStoreMu。

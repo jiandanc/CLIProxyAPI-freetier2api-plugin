@@ -21,6 +21,12 @@ import "strings"
 
 // PrepareOptions 是改写管线的输入。
 type PrepareOptions struct {
+	// Model 是目标模型裸名。非空时直接改写 payload["model"]。
+	Model string
+	// PromptMode 提示词模式：passthrough / custom / append。
+	PromptMode string
+	// PromptText 自定义或追加的提示词内容。
+	PromptText string
 	// Sanitize 开启指纹脱敏（第 12 步）。
 	Sanitize bool
 	// DefaultEfforts 是模型名 → 默认档位的表（来自模型目录）。
@@ -51,6 +57,11 @@ func PrepareBody(body []byte, opts PrepareOptions) []byte {
 		return body
 	}
 
+	// 0) 出站 model 设为裸名（单 pass 改写，无需二次序列化）。
+	if trimmedModel := strings.TrimSpace(opts.Model); trimmedModel != "" {
+		payload["model"] = trimmedModel
+	}
+
 	// 1) 上游拒绝非流式。
 	payload["stream"] = true
 
@@ -67,6 +78,9 @@ func PrepareBody(body []byte, opts PrepareOptions) []byte {
 
 	// 5) developer → system。
 	normalizeRoles(payload)
+
+	// 5.5) 系统提示词处理（透传 / 替换 / 追加）。
+	applyPromptMode(payload, opts.PromptMode, opts.PromptText)
 
 	// 6) image_url 归一。
 	normalizeImageURL(payload)
@@ -298,4 +312,55 @@ func defaultEffortFor(table map[string]string, model string) string {
 		return ""
 	}
 	return strings.TrimSpace(table[strings.TrimSpace(model)])
+}
+
+// applyPromptMode 处理系统提示词：custom 替换全部 system/developer；append 在开头连续 system 块后追加。
+func applyPromptMode(payload map[string]any, mode, text string) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	text = strings.TrimSpace(text)
+	if mode == "" || mode == "passthrough" || text == "" {
+		return
+	}
+	messages, okMessages := payload["messages"].([]any)
+	if !okMessages {
+		return
+	}
+	if mode == "custom" {
+		kept := make([]any, 0, len(messages)+1)
+		kept = append(kept, map[string]any{"role": "system", "content": text})
+		for _, item := range messages {
+			msgMap, okMap := item.(map[string]any)
+			if !okMap {
+				kept = append(kept, item)
+				continue
+			}
+			role, _ := msgMap["role"].(string)
+			switch strings.ToLower(strings.TrimSpace(role)) {
+			case "system", "developer":
+				continue
+			}
+			kept = append(kept, item)
+		}
+		payload["messages"] = kept
+	} else if mode == "append" {
+		insertAt := 0
+		for insertAt < len(messages) {
+			msgMap, okMap := messages[insertAt].(map[string]any)
+			if !okMap {
+				break
+			}
+			role, _ := msgMap["role"].(string)
+			switch strings.ToLower(strings.TrimSpace(role)) {
+			case "system", "developer":
+				insertAt++
+				continue
+			}
+			break
+		}
+		out := make([]any, 0, len(messages)+1)
+		out = append(out, messages[:insertAt]...)
+		out = append(out, map[string]any{"role": "system", "content": text})
+		out = append(out, messages[insertAt:]...)
+		payload["messages"] = out
+	}
 }

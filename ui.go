@@ -84,7 +84,7 @@ progress { width: 160px; height: 8px; }
 <body>
 <header>
   <h1>WorkBuddy 2API</h1>
-  <div class="sub">CodeBuddy 账号、额度、模型与任务管理 · 数据来自 CPA 管理接口，页面本身不含任何凭证</div>
+  <div class="sub">CodeBuddy 账号、额度、模型与任务管理 · 本地零凭证存储</div>
 </header>
 <main>
   <div class="card" id="keyBox" hidden>
@@ -95,8 +95,7 @@ progress { width: 160px; height: 8px; }
     </div>
     <div class="hint">
       <span id="keyStatus" class="muted"></span><br>
-      本页与 CPA 管理面板同源，正常情况下会**自动复用**面板已保存的密钥，无需填写。
-      若面板未勾选「记住密码」，密钥不会落盘，需要在此手动填一次（只保存在本标签页，关掉即失效）。
+      自动复用管理面板密钥；未生效可在此手动填入。
     </div>
   </div>
 
@@ -106,19 +105,12 @@ progress { width: 160px; height: 8px; }
     <div class="card">
       <h2>账号概览 <span class="muted" id="accountCount"></span></h2>
       <div class="row">
-        <button class="act primary" id="btnAddCn">添加账号（国内版）</button>
-        <button class="act primary" id="btnAddGlobal">添加账号（国际版）</button>
-        <button class="act" id="btnRefresh">刷新（Token续期）</button>
+        <button class="act primary" id="btnAddCn">添加国内账号</button>
+        <button class="act primary" id="btnAddGlobal">添加海外账号</button>
+        <button class="act" id="btnRefresh">Token续期</button>
         <button class="act" id="btnLoadQuotas">查询额度</button>
-        <button class="act" id="btnCheckin">全部签到</button>
-        <button class="act primary" id="btnAutoAll">全部一键完成任务</button>
-      </div>
-      <div class="hint">
-        「刷新（Token续期）」向腾讯上游请求刷新全部账号的 Auth Token（保活续期），续期成功后将更新凭证文件的修改时间；「查询额度」批量拉取账号额度；添加账号走 OAuth 设备授权，国内版与国际版凭证不通用，请按账号实际站点选择。<br>
-        「全部一键完成任务」逐账号依次执行成长任务（顺序即依赖序），
-        其中专家类、技能与夜猫子含<b>真实对话</b>，会消耗账号额度，账号多时耗时较长。
-        活跃上报、Token 保活、猫猫旅行与夜猫子都由每日排程自动执行，也可随时手动触发。
-        国际版账号没有签到与成长任务体系（上游不提供），相关操作会自动跳过。
+        <button class="act" id="btnCheckin">一键签到</button>
+        <button class="act primary" id="btnAutoAll">一键做任务</button>
       </div>
 
       <div class="card" id="loginBox" hidden>
@@ -131,7 +123,6 @@ progress { width: 160px; height: 8px; }
         <div class="hint" id="loginStatus">等待授权…</div>
       </div>
 
-      <div class="hint">模型清单刷新后，新模型会在宿主下次重载插件时进入 /v1/models。</div>
       <div id="accounts"></div>
     </div>
   </section>
@@ -148,10 +139,7 @@ progress { width: 160px; height: 8px; }
         <label>筛选 <input type="text" id="modelFilter" placeholder="如 glm / gpt" style="width:160px"></label>
       </div>
       <div class="hint">
-        模型 ID 带 <b>cn:</b> 或 <b>global:</b> 前缀，分别对应国内版与国际版账号——
-        前缀决定请求被路由到哪个域的凭证，两域凭证不通用。
-        勾选后点「禁用选中 / 启用选中」批量操作；禁用即时生效（请求将被直接拦截拒绝），
-        列表里仍会保留并标注状态。
+        对外同名模型自动合并；支持按国内 (WorkBuddyCN) / 海外 (WorkBuddyGLOBAL) 独立启用或禁用。
       </div>
       <div id="models"></div>
     </div>
@@ -166,8 +154,7 @@ progress { width: 160px; height: 8px; }
         <label>并发 <input type="number" id="queueConc" value="1" min="1" max="4" style="width:64px"></label>
       </div>
       <div class="hint">
-        含真实对话的任务会消耗额度；账号内串行、账号间并发。
-        执行进度直接显示在下方各账号的任务清单里。
+        任务账号内串行、账号间并发调度。已达标任务自动跳过重复动作。
       </div>
       <div class="hint" id="queueProgress"></div>
       <div id="scans"></div>
@@ -184,10 +171,19 @@ progress { width: 160px; height: 8px; }
       <div class="row" style="margin-top:8px">
         <label><input type="checkbox" id="setAutoTasks"> 自动跑任务闭环（连登兑换、抽奖、旅行、夜猫子）</label>
       </div>
-      <div class="row" style="margin-top:12px">
-        <button class="act primary" id="btnSaveSettings">保存</button>
+      <div class="row" style="margin-top:8px">
+        <label>提示词防御模式
+          <select id="setPromptMode" style="margin-left:8px;padding:3px 6px">
+            <option value="passthrough">透传（保持客户端原始提示词）</option>
+            <option value="custom">替换（剥离特征提示词，注入纯净提示词）</option>
+            <option value="append">追加（文末追加安全指引）</option>
+          </select>
+        </label>
       </div>
-        <div id="scheduleInfo" class="hint"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="act primary" id="btnSaveSettings">保存设置</button>
+      </div>
+      <div id="scheduleInfo" class="hint"></div>
     </div>
   </section>
 
@@ -416,16 +412,36 @@ progress { width: 160px; height: 8px; }
       host.appendChild(el("div", "没有账号。请在 CPA 面板的「添加认证」里选择 WorkBuddy 2API，或在控制台页发起登录。", "muted"));
       return;
     }
+    // 排序：供应商名称 + 账号 ID（同一供应商聚合展示，供应商内按账号 ID 升序）
+    accounts.sort(function (a, b) {
+      var vendorA = (a.realm === "global") ? "WorkBuddyGLOBAL" : "WorkBuddyCN";
+      var vendorB = (b.realm === "global") ? "WorkBuddyGLOBAL" : "WorkBuddyCN";
+      if (vendorA !== vendorB) {
+        return vendorA < vendorB ? -1 : 1;
+      }
+      var idA = String(a.auth_id || a.label || "").toLowerCase();
+      var idB = String(b.auth_id || b.label || "").toLowerCase();
+      if (idA !== idB) {
+        return idA < idB ? -1 : 1;
+      }
+      return 0;
+    });
+
     var table = el("table");
     var head = el("tr");
-    ["账号", "域", "状态", "签到", "剩余 / 总额", "使用率", "刷新时间"]
+    ["供应商", "账号", "状态", "签到", "剩余 / 总额", "使用率", "刷新时间"]
       .forEach(function (name) { head.appendChild(el("th", name)); });
     table.appendChild(head);
 
     accounts.forEach(function (account) {
       var row = el("tr");
+      var isGlobal = (account.realm === "global");
+      var vendor = isGlobal ? "WorkBuddyGLOBAL" : "WorkBuddyCN";
+      var vendorCell = el("td");
+      vendorCell.appendChild(pill(vendor, isGlobal ? "" : "warn"));
+      row.appendChild(vendorCell);
+
       row.appendChild(el("td", account.label || account.auth_id || "-"));
-      row.appendChild(el("td", account.realm === "global" ? "国际版" : "国内版"));
       row.appendChild(cellWith(account.disabled ? pill("已禁用", "err") : pill("正常", "ok")));
 
       // 签到列：国际版没有签到体系（原项目的 D4 门控：global 无签到/成长任务，
@@ -439,8 +455,9 @@ progress { width: 160px; height: 8px; }
           : "未签到"));
       }
 
-      // 额度列：数据来自「查询额度」，未查询时显示占位。
-      var quota = quotaByAuth[account.auth_id];
+      // 额度列：多键匹配避免格式差异
+      var aid = account.auth_id || "";
+      var quota = quotaByAuth[aid] || quotaByAuth[aid.replace(/\.json$/i, "")] || quotaByAuth[account.auth_index] || quotaByAuth[account.label];
       if (!quota) {
         // 该账号还没有额度结果（首次进入或刚添加）。进入页面会自动查一次，
         // 添加账号与手动刷新也会重查，所以这里只是短暂状态。
@@ -492,6 +509,10 @@ progress { width: 160px; height: 8px; }
       document.getElementById("setAutoCheckin").checked = !!settings.auto_checkin;
       document.getElementById("setCheckinAt").value = settings.auto_checkin_at || "10:00";
       document.getElementById("setAutoTasks").checked = !!settings.auto_tasks;
+      var promptSel = document.getElementById("setPromptMode");
+      if (promptSel) {
+        promptSel.value = status.prompt_mode || settings.prompt_mode || "passthrough";
+      }
       var scheduler = status.scheduler || {};
       document.getElementById("scheduleInfo").textContent =
         "下次执行：" + (scheduler.next_at || "-") + " · 任务：" + ((scheduler.next_tasks || []).join(", ") || "无");
@@ -511,7 +532,11 @@ progress { width: 160px; height: 8px; }
       var results = (data && data.results) || [];
       quotaByAuth = {};
       results.forEach(function (entry) {
-        if (entry.auth_id) quotaByAuth[entry.auth_id] = entry;
+        if (entry.auth_id) {
+          quotaByAuth[entry.auth_id] = entry;
+          quotaByAuth[entry.auth_id.replace(/\.json$/i, "")] = entry;
+        }
+        if (entry.label) quotaByAuth[entry.label] = entry;
       });
       if (lastStatus) renderAccounts(lastStatus);
       if (quiet) return;
@@ -533,15 +558,33 @@ progress { width: 160px; height: 8px; }
     host.textContent = "";
     var filter = (document.getElementById("modelFilter").value || "").trim().toLowerCase();
     var list = allModels.filter(function (m) {
-      return !filter || String(m.id || "").toLowerCase().indexOf(filter) >= 0;
+      if (!filter) return true;
+      var isGlobal = (m.realm === "global" || String(m.scope_id || "").indexOf("global:") === 0);
+      var vendor = isGlobal ? "workbuddyglobal 海外" : "workbuddycn 国内";
+      var bareID = String(m.id || "").replace(/^(cn|global):/, "");
+      var text = (bareID + " " + String(m.name || "") + " " + vendor).toLowerCase();
+      return text.indexOf(filter) >= 0;
     });
-    // 排序：启用的在上、禁用的在下；同组按 ID 升序。
-    // 禁用项沉底便于一眼看清"当前有哪些被关掉了"。
+    // 排序：状态 + 供应商名称 + 模型 ID（启用在上，禁用在下；同状态内按 供应商名称 + 模型 ID 升序）
     list.sort(function (a, b) {
-      var left = a.disabled ? 1 : 0;
-      var right = b.disabled ? 1 : 0;
-      if (left !== right) return left - right;
-      return String(a.id || "") < String(b.id || "") ? -1 : 1;
+      var statusA = a.disabled ? 1 : 0;
+      var statusB = b.disabled ? 1 : 0;
+      if (statusA !== statusB) return statusA - statusB;
+
+      var isGlobalA = (a.realm === "global" || String(a.scope_id || "").indexOf("global:") === 0);
+      var vendorA = isGlobalA ? "WorkBuddyGLOBAL" : "WorkBuddyCN";
+      var isGlobalB = (b.realm === "global" || String(b.scope_id || "").indexOf("global:") === 0);
+      var vendorB = isGlobalB ? "WorkBuddyGLOBAL" : "WorkBuddyCN";
+      if (vendorA !== vendorB) {
+        return vendorA < vendorB ? -1 : 1;
+      }
+
+      var idA = String(a.id || "").replace(/^(cn|global):/, "").toLowerCase();
+      var idB = String(b.id || "").replace(/^(cn|global):/, "").toLowerCase();
+      if (idA !== idB) {
+        return idA < idB ? -1 : 1;
+      }
+      return 0;
     });
     setText("modelCount", allModels.length ? "（" + list.length + " / " + allModels.length + "）" : "");
 
@@ -554,7 +597,7 @@ progress { width: 160px; height: 8px; }
     }
     var table = el("table");
     var head = el("tr");
-    ["", "模型 ID", "名称", "上下文", "输出上限", "推理档位", "能力", "状态"]
+    ["", "供应商", "模型 ID", "名称", "上下文", "输出上限", "推理档位", "能力", "状态"]
       .forEach(function (name) { head.appendChild(el("th", name)); });
     table.appendChild(head);
 
@@ -564,14 +607,22 @@ progress { width: 160px; height: 8px; }
       var checkCell = el("td");
       var checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      // 默认不勾选：勾选是"选中待操作项"，与模型是否已禁用无关
-      //（禁用状态由「状态」列体现）。
       checkbox.checked = false;
-      checkbox.setAttribute("data-model-id", model.id);
+      checkbox.setAttribute("data-model-id", model.scope_id || model.id);
       checkCell.appendChild(checkbox);
       row.appendChild(checkCell);
 
-      row.appendChild(el("td", model.id, "mono"));
+      // 供应商列
+      var isGlobal = (model.realm === "global" || String(model.scope_id || "").indexOf("global:") === 0);
+      var vendor = isGlobal ? "WorkBuddyGLOBAL" : "WorkBuddyCN";
+      var vendorCell = el("td");
+      vendorCell.appendChild(pill(vendor, isGlobal ? "" : "warn"));
+      row.appendChild(vendorCell);
+
+      // 模型 ID 列（去除 cn: / global: 前缀，显示裸名）
+      var bareID = String(model.id || "").replace(/^(cn|global):/, "");
+      row.appendChild(el("td", bareID, "mono"));
+
       row.appendChild(el("td", model.name || "—"));
       row.appendChild(el("td", model.context_length ? formatTokens(model.context_length) : "—"));
       row.appendChild(el("td", model.max_output_tokens ? formatTokens(model.max_output_tokens) : "—"));
@@ -583,7 +634,7 @@ progress { width: 160px; height: 8px; }
       if (model.supports_images) caps.push("图片");
       if (model.supports_tools) caps.push("工具");
       row.appendChild(el("td", caps.join(" · ") || "—", caps.length ? "" : "muted"));
-      row.appendChild(cellWith(model.disabled ? pill("已禁用", "err") : pill("启用中", "ok")));
+      row.appendChild(cellWith(model.disabled ? pill("已禁用", "err") : pill("正常", "ok")));
       table.appendChild(row);
     });
     host.appendChild(table);
@@ -677,18 +728,20 @@ progress { width: 160px; height: 8px; }
           row.appendChild(el("td", (item.current || 0) + " / " + (item.target || 0)));
           row.appendChild(cellWith(item.uses_chat ? pill("真实对话", "warn") : pill("纯上报")));
 
-          // 执行状态直接来自队列快照（未跑过则显示待执行）。
+          // 执行状态：已达标的任务直接显示已达标
           var state = progress[item.code];
-          if (!state) {
-            row.appendChild(el("td", "待执行", "muted"));
-          } else {
+          var cell = el("td");
+          if (state) {
             var kind = state.status === "done" ? "ok"
               : (state.status === "error" ? "err" : (state.status === "running" ? "warn" : ""));
-            var cell = el("td");
             cell.appendChild(pill(state.status, kind));
             if (state.message) cell.appendChild(el("span", " " + state.message, "muted"));
-            row.appendChild(cell);
+          } else if (item.target > 0 && item.current >= item.target) {
+            cell.appendChild(pill("已达标", "ok"));
+          } else {
+            cell.appendChild(el("span", "待执行", "muted"));
           }
+          row.appendChild(cell);
           table.appendChild(row);
         });
         card.appendChild(table);
@@ -949,10 +1002,12 @@ progress { width: 160px; height: 8px; }
     }).catch(function (err) { banner("err", err.message); });
   });
   document.getElementById("btnSaveSettings").addEventListener("click", function () {
+    var promptSel = document.getElementById("setPromptMode");
     var payload = {
       auto_checkin: document.getElementById("setAutoCheckin").checked,
       auto_checkin_at: document.getElementById("setCheckinAt").value,
-      auto_tasks: document.getElementById("setAutoTasks").checked
+      auto_tasks: document.getElementById("setAutoTasks").checked,
+      prompt_mode: promptSel ? promptSel.value : "passthrough"
     };
     api("POST", "/settings", payload).then(function () {
       banner("ok", "设置已保存并生效");

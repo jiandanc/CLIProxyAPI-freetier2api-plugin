@@ -65,6 +65,8 @@ type Options struct {
 	// PromptMode / PromptText 控制系统提示词处理。
 	PromptMode string
 	PromptText string
+	// OnContentBlocked 是内容审核拦截时的回调（触发提示词降级）。
+	OnContentBlocked func()
 	// SanitizeFingerprints 开启出站请求体黑名单脱敏。
 	SanitizeFingerprints bool
 	// PassthroughIP 决定是否把客户端 IP 透传给上游。
@@ -291,9 +293,9 @@ func (c *Client) RefreshToken(cred *Credential) error {
 	if errUnmarshal := json.Unmarshal(body, &envelope); errUnmarshal == nil && envelope.Code == 0 && strings.TrimSpace(envelope.Data.AccessToken) != "" {
 		token = envelope.Data
 	} else if errUnmarshal == nil && envelope.Code != 0 {
-		return fmt.Errorf("refresh failed: code=%d msg=%s", envelope.Code, envelope.Msg)
+		return enrichClassifyError(resp.StatusCode, string(body), resp.Header)
 	} else if errDirect := json.Unmarshal(body, &token); errDirect != nil || strings.TrimSpace(token.AccessToken) == "" {
-		return fmt.Errorf("refresh failed: no accessToken in response — re-login required")
+		return &Error{Kind: KindSessionDead, Status: http.StatusUnauthorized, Msg: "refresh failed: no accessToken in response — re-login required"}
 	}
 
 	// 快照校验：并发刷新已经写过就放弃本次写回，避免用旧响应覆盖新值。
@@ -368,6 +370,12 @@ func readDeviceTokenFile(path string) string {
 // 用途：设备指纹（X-Machine-ID / X-Session-ID）与事件里的 machineId。
 // 派生种子混入机器盐，使不同部署拥有独立的指纹空间——
 // 否则上游一旦识别出派生模式即可全局拉黑所有同源部署。
+func DeriveID(uid, purpose string) string {
+	seed := deriveSaltPrefix + purpose + ":" + uid + ":" + currentInstallSalt()
+	sum := sha256.Sum256([]byte(seed))
+	return hex.EncodeToString(sum[:18])
+}
+
 func deriveID(uid, purpose string) string {
 	seed := deriveSaltPrefix + purpose + ":" + uid + ":" + currentInstallSalt()
 	sum := sha256.Sum256([]byte(seed))

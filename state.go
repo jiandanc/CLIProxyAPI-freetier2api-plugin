@@ -74,9 +74,10 @@ type pluginState struct {
 	Version int `json:"version"`
 
 	// AutoCheckin / AutoCheckinAt / AutoTasks 是页面上可改的任务设置。
-	AutoCheckin   *bool  `json:"auto_checkin,omitempty"`
-	AutoCheckinAt string `json:"auto_checkin_at,omitempty"`
-	AutoTasks     *bool  `json:"auto_tasks,omitempty"`
+	AutoCheckin   *bool   `json:"auto_checkin,omitempty"`
+	AutoCheckinAt string  `json:"auto_checkin_at,omitempty"`
+	AutoTasks     *bool   `json:"auto_tasks,omitempty"`
+	PromptMode    *string `json:"prompt_mode,omitempty"`
 
 	// CheckinHours / TravelHours / ActivityHours / KeepaliveHours / BlackcatHours
 	// 是各定时任务的整点小时列表（0-23）。
@@ -129,6 +130,7 @@ func loadState(cfg pluginConfig) (*pluginState, error) {
 	}
 	normalizeState(&loaded)
 	stateCache = &loaded
+	reloadDisabledModelCache(loaded.DisabledModels)
 	return stateCache, nil
 }
 
@@ -168,6 +170,7 @@ func snapshotState() pluginState {
 	out.ActivityHours = append([]int(nil), stateCache.ActivityHours...)
 	out.KeepaliveHours = append([]int(nil), stateCache.KeepaliveHours...)
 	out.BlackcatHours = append([]int(nil), stateCache.BlackcatHours...)
+	out.DisabledModels = append([]string(nil), stateCache.DisabledModels...)
 	if stateCache.AutoCheckin != nil {
 		enabled := *stateCache.AutoCheckin
 		out.AutoCheckin = &enabled
@@ -175,6 +178,10 @@ func snapshotState() pluginState {
 	if stateCache.AutoTasks != nil {
 		enabled := *stateCache.AutoTasks
 		out.AutoTasks = &enabled
+	}
+	if stateCache.PromptMode != nil {
+		m := *stateCache.PromptMode
+		out.PromptMode = &m
 	}
 	out.Checkin = make(map[string]checkinRecord, len(stateCache.Checkin))
 	for key, value := range stateCache.Checkin {
@@ -271,3 +278,9 @@ var nowFunc = time.Now
 func taskStateKey(uid, code string) string {
 	return strings.TrimSpace(uid) + "\x1f" + strings.TrimSpace(code)
 }
+
+// nowRFC3339 返回当前时间的 RFC3339 字符串。
+func nowRFC3339() string { return nowFunc().Format(time.RFC3339) }
+
+// nowUnixMs 返回当前毫秒时间戳。
+func nowUnixMs() int64 { return nowFunc().UnixMilli() }

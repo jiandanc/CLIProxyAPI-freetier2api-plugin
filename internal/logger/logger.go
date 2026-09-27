@@ -45,6 +45,8 @@ type Entry struct {
 type ring struct {
 	mu      sync.Mutex
 	entries []Entry
+	head    int
+	full    bool
 	nextSeq uint64
 }
 
@@ -220,19 +222,28 @@ func (r *ring) append(entry Entry) {
 	defer r.mu.Unlock()
 	r.nextSeq++
 	entry.Seq = r.nextSeq
-	if len(r.entries) >= ringCapacity {
-		// 环形覆盖：丢掉最旧的一条，保持容量恒定。
-		copy(r.entries, r.entries[1:])
-		r.entries[len(r.entries)-1] = entry
+	if len(r.entries) < ringCapacity {
+		r.entries = append(r.entries, entry)
 		return
 	}
-	r.entries = append(r.entries, entry)
+	r.entries[r.head] = entry
+	r.head = (r.head + 1) % ringCapacity
+	r.full = true
+}
+
+func (r *ring) orderedEntries() []Entry {
+	if !r.full {
+		out := make([]Entry, len(r.entries))
+		copy(out, r.entries)
+		return out
+	}
+	out := make([]Entry, ringCapacity)
+	n := copy(out, r.entries[r.head:])
+	copy(out[n:], r.entries[:r.head])
+	return out
 }
 
 // Snapshot 返回 seq 大于 since 的日志（最多 limit 条）与当前最大 seq。
-//
-// since 递增拉取是管理页的增量协议：首次传 0 拿最近 limit 条，
-// 之后传上次返回的 next 值即可只拿新增部分。
 func Snapshot(since uint64, limit int) ([]Entry, uint64) {
 	if limit <= 0 || limit > ringCapacity {
 		limit = 200
@@ -241,18 +252,19 @@ func Snapshot(since uint64, limit int) ([]Entry, uint64) {
 	defer globalRing.mu.Unlock()
 
 	newest := globalRing.nextSeq
+	all := globalRing.orderedEntries()
 	out := make([]Entry, 0, limit)
 	if since == 0 {
-		start := len(globalRing.entries) - limit
+		start := len(all) - limit
 		if start < 0 {
 			start = 0
 		}
-		for _, entry := range globalRing.entries[start:] {
+		for _, entry := range all[start:] {
 			out = append(out, entry)
 		}
 		return out, newest
 	}
-	for _, entry := range globalRing.entries {
+	for _, entry := range all {
 		if entry.Seq <= since {
 			continue
 		}

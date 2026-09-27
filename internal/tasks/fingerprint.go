@@ -18,10 +18,6 @@ package tasks
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
 	"time"
 
 	"workbuddy2api-plugin/internal/cb"
@@ -62,20 +58,11 @@ var (
 // 36 位 hex（18 字节），与官方客户端的设备 id 长度一致。
 // 跨重启稳定、账号间互异、部署间隔离（混入机器盐，见 cb.SetInstallSalt）。
 func fingerprint(credential *cb.Credential, purpose string) string {
-	uid := credential.UIDValue()
-	sum := sha256.Sum256([]byte("wbtask:" + purpose + ":" + uid))
-	return hex.EncodeToString(sum[:18])
+	return cb.DeriveID(credential.UIDValue(), purpose)
 }
 
-// randomHex 生成 n 字节的随机 hex 串。
 func randomHex(n int) string {
-	buffer := make([]byte, n)
-	if _, errRand := rand.Read(buffer); errRand != nil {
-		// 极端情况下的退避：用时间戳派生，仍是唯一值。
-		sum := sha256.Sum256([]byte(fmt.Sprintf("fallback-%d", time.Now().UnixNano())))
-		return hex.EncodeToString(sum[:n])
-	}
-	return hex.EncodeToString(buffer)
+	return cb.RandomHex(n)
 }
 
 // nowUnixMs 返回当前毫秒时间戳。

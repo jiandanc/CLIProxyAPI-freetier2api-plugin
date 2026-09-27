@@ -90,10 +90,10 @@ func handleModelForAuth(request []byte) ([]byte, error) {
 	return okEnvelope(pluginapi.ModelResponse{Provider: providerKey, Models: models})
 }
 
-// staticModels 返回两个域的模型并集（带 realm 前缀）。
+// staticModels 返回两个域的模型并集（裸模型名，同名合并去重）。
 func staticModels(ctx context.Context) ([]pluginapi.ModelInfo, error) {
 	cfg := loadedConfig()
-	out := make([]pluginapi.ModelInfo, 0, 64)
+	var all []pluginapi.ModelInfo
 	var firstErr error
 	for _, region := range []cb.Region{cb.RegionCN, cb.RegionGlobal} {
 		if !realmEnabled(cfg, string(region)) {
@@ -106,33 +106,62 @@ func staticModels(ctx context.Context) ([]pluginapi.ModelInfo, error) {
 			}
 			continue
 		}
-		out = append(out, models...)
+		all = append(all, models...)
 	}
-	// 一个域都探测不到时才报错；只要有一个可用就让插件继续工作。
-	if len(out) == 0 && firstErr != nil {
+	if len(all) == 0 && firstErr != nil {
 		return nil, errorToPluginError(firstErr)
 	}
-	out = append(out, extraModels(cfg)...)
-	// 禁用的模型不进宿主（extra_models 同样遵守）。
-	return filterDisabledModels(out), nil
+	for _, extra := range extraModels(cfg) {
+		r, bare := SplitModelID(extra.ID)
+		region := cb.NormalizeRegion(r)
+		if !isModelDisabled(region, bare) {
+			all = append(all, extra)
+		}
+	}
+
+	// 裸模型名合并去重：CPA 呈现单一模型，参数取并集最优
+	merged := make([]pluginapi.ModelInfo, 0, len(all))
+	seen := make(map[string]int, len(all))
+	for _, model := range all {
+		bare := strings.TrimSpace(model.ID)
+		if bare == "" {
+			continue
+		}
+		if idx, ok := seen[bare]; ok {
+			if model.ContextLength > merged[idx].ContextLength {
+				merged[idx].ContextLength = model.ContextLength
+				merged[idx].InputTokenLimit = model.InputTokenLimit
+			}
+			if model.MaxCompletionTokens > merged[idx].MaxCompletionTokens {
+				merged[idx].MaxCompletionTokens = model.MaxCompletionTokens
+				merged[idx].OutputTokenLimit = model.OutputTokenLimit
+			}
+			if model.Thinking != nil && merged[idx].Thinking == nil {
+				merged[idx].Thinking = model.Thinking
+			}
+		} else {
+			seen[bare] = len(merged)
+			merged = append(merged, model)
+		}
+	}
+	return merged, nil
 }
 
-// modelsForRealm 返回某个域的模型（带该域前缀）。
+// modelsForRealm 返回某个域的可用模型（裸模型名，已过滤该域禁用项）。
 func modelsForRealm(ctx context.Context, region cb.Region) ([]pluginapi.ModelInfo, error) {
 	client := newUpstreamClient(ctx)
 	models, errModels := client.FetchModels(region)
 	if errModels != nil {
 		return nil, errModels
 	}
-	// 刷新档位表：对话路径需要它来决定 reasoning_effort 的合法值。
-	publishEffortTables(models)
+	// 刷新档位表：按域合并至全局，不单点覆盖
+	publishEffortTables(region, models)
 
 	out := make([]pluginapi.ModelInfo, 0, len(models))
 	for _, model := range models {
 		out = append(out, ModelInfoToPluginAPI(region, model))
 	}
-	// 禁用的模型不进宿主：在注册层剔除，客户端就选不到。
-	return filterDisabledModels(out), nil
+	return filterDisabledModelsForRealm(region, out), nil
 }
 
 // extraModels 把配置里的额外模型名转成模型条目。
@@ -177,19 +206,8 @@ var (
 	lastEffortPublish time.Time
 )
 
-// publishEffortTables 把模型清单里的档位信息发布给对话路径。
-//
-// 节流：模型清单会被 /v1/models 与 model.for_auth 反复取用，
-// 而档位表内容变化极慢，没必要每次都重建。
-func publishEffortTables(models []cb.ModelInfo) {
-	effortPublishMu.Lock()
-	if time.Since(lastEffortPublish) < time.Minute {
-		effortPublishMu.Unlock()
-		return
-	}
-	lastEffortPublish = time.Now()
-	effortPublishMu.Unlock()
-
+// publishEffortTables 把模型清单里的档位信息按域合并发布给对话路径。
+func publishEffortTables(region cb.Region, models []cb.ModelInfo) {
 	defaults := make(map[string]string, len(models))
 	supported := make(map[string][]string, len(models))
 	for _, model := range models {
@@ -200,7 +218,7 @@ func publishEffortTables(models []cb.ModelInfo) {
 			supported[model.ID] = model.Efforts
 		}
 	}
-	cb.SetEffortTables(defaults, supported)
+	cb.SetEffortTablesForRegion(region, defaults, supported)
 }
 
 // applyModelCatalog 在注册/重配置时预热模型缓存。
@@ -324,7 +342,7 @@ func refreshModelsFromUpstream(ctx context.Context) (int, error) {
 			}
 			continue
 		}
-		publishEffortTables(models)
+		publishEffortTables(region, models)
 		total += len(models)
 	}
 	if total == 0 && firstErr != nil {
