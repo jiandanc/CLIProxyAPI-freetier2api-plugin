@@ -23,7 +23,7 @@ const consolePageTemplate = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>WorkBuddy 2API</title>
+<title>FreeTier 2API</title>
 <style>
 :root {
   color-scheme: light dark;
@@ -79,12 +79,20 @@ input[type=text], input[type=number] { padding: 6px 8px; border: 1px solid var(-
 .banner.ok { background: rgba(26,127,55,.1); border: 1px solid var(--ok); color: var(--ok); }
 .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
 progress { width: 160px; height: 8px; }
+.dropdown { position: relative; display: inline-block; }
+.dropdown-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
+                 min-width: 180px; background: var(--card); border: 1px solid var(--border);
+                 border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.12); overflow: hidden; }
+.dropdown-menu button { display: block; width: 100%; padding: 9px 14px; border: 0;
+                        background: transparent; color: var(--fg); text-align: left;
+                        cursor: pointer; font-size: 13px; }
+.dropdown-menu button:hover { background: var(--bg); color: var(--accent); }
 </style>
 </head>
 <body>
 <header>
-  <h1>WorkBuddy 2API</h1>
-  <div class="sub">CodeBuddy 账号、额度、模型与任务管理 · 本地零凭证存储</div>
+  <h1>FreeTier 2API</h1>
+  <div class="sub">WorkBuddy / Qoder 账号、额度、模型与任务管理 · 本地零凭证存储</div>
 </header>
 <main>
   <div class="card" id="keyBox" hidden>
@@ -105,8 +113,10 @@ progress { width: 160px; height: 8px; }
     <div class="card">
       <h2>账号概览 <span class="muted" id="accountCount"></span></h2>
       <div class="row">
-        <select id="addVendor" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px"></select>
-        <button class="act primary" id="btnAddAccount">添加账号</button>
+        <div class="dropdown">
+          <button class="act primary" id="btnAddAccount">添加账号 ▾</button>
+          <div class="dropdown-menu" id="addVendorMenu" hidden></div>
+        </div>
         <button class="act" id="btnRefresh">Token续期</button>
         <button class="act" id="btnLoadQuotas">查询额度</button>
         <button class="act" id="btnCheckin">一键签到</button>
@@ -165,11 +175,11 @@ progress { width: 160px; height: 8px; }
     <div class="card">
       <h2>运行期设置</h2>
       <div class="row">
-        <label><input type="checkbox" id="setAutoCheckin"> 每日自动签到</label>
-        <label>签到时间 <input type="text" id="setCheckinAt" placeholder="10:00" style="width:80px"></label>
+        <label><input type="checkbox" id="setAutoCheckin"> 每日自动任务</label>
+        <label>执行时间 <input type="text" id="setCheckinAt" placeholder="10:00" style="width:80px"></label>
       </div>
       <div class="row" style="margin-top:8px">
-        <label><input type="checkbox" id="setAutoTasks"> 自动跑任务闭环（连登兑换、抽奖、旅行、夜猫子）</label>
+        <label><input type="checkbox" id="setAutoTasks"> 自动每日任务</label>
       </div>
       <div class="row" style="margin-top:8px">
         <label>提示词防御模式
@@ -407,16 +417,21 @@ progress { width: 160px; height: 8px; }
     return api("GET", "/vendors").then(function (data) {
       var list = (data && data.vendors) || [];
       vendorsById = {};
-      var select = document.getElementById("addVendor");
-      if (select) select.textContent = "";
+      var menu = document.getElementById("addVendorMenu");
+      if (menu) menu.textContent = "";
       list.forEach(function (vendor) {
         vendorsById[vendor.id] = vendor;
-        if (select) {
-          var option = document.createElement("option");
-          option.value = vendor.id;
-          option.textContent = vendor.name;
-          select.appendChild(option);
-        }
+        if (!menu) return;
+        // 每一项就是「用这个供应商添加账号」的入口：点一下直接开始登录，
+        // 不再需要先选中再点按钮（两步变一步）。
+        var item = document.createElement("button");
+        item.type = "button";
+        item.textContent = vendor.name;
+        item.addEventListener("click", function () {
+          closeVendorMenu();
+          startLogin(vendor.id);
+        });
+        menu.appendChild(item);
       });
       vendorsLoaded = true;
       return list;
@@ -424,6 +439,23 @@ progress { width: 160px; height: 8px; }
       // 供应商列表拉不到不该让整页失效：账号表退化成显示原始 id。
       return [];
     });
+  }
+
+  // closeVendorMenu 收起供应商下拉。
+  function closeVendorMenu() {
+    var menu = document.getElementById("addVendorMenu");
+    if (menu) menu.hidden = true;
+  }
+
+  // toggleVendorMenu 展开/收起供应商下拉。
+  function toggleVendorMenu() {
+    var menu = document.getElementById("addVendorMenu");
+    if (!menu) return;
+    if (menu.hidden && !menu.childElementCount) {
+      banner("warn", "没有可用的供应商，请检查插件配置的 enabled_realms。");
+      return;
+    }
+    menu.hidden = !menu.hidden;
   }
 
   // vendorLabel 返回供应商展示名；未知 id 时退回 id 本身。
@@ -650,10 +682,11 @@ progress { width: 160px; height: 8px; }
       // 供应商列
       var vendor = vendorLabel(model.vendor_id, model.realm);
       var vendorCell = el("td");
-      vendorCell.appendChild(pill(vendor, isGlobal ? "" : "warn"));
+      // 国内版用 warn 色区分（海外版用默认色），与账号表保持一致的视觉约定。
+      vendorCell.appendChild(pill(vendor, model.realm === "global" ? "" : "warn"));
       row.appendChild(vendorCell);
 
-      // 模型 ID 列（去除 cn: / global: 前缀，显示裸名）
+      // 模型 ID 列（裸名，不带供应商前缀）
       var bareID = String(model.id || "");
       row.appendChild(el("td", bareID, "mono"));
 
@@ -927,15 +960,12 @@ progress { width: 160px; height: 8px; }
     }, 2000);
   }
 
-  document.getElementById("btnAddAccount").addEventListener("click", function () {
-    var select = document.getElementById("addVendor");
-    var vendorID = select.value;
-    if (!vendorID) {
-      banner("warn", "没有可用的供应商，请检查插件配置的 enabled_realms。");
-      return;
-    }
-    startLogin(vendorID);
+  document.getElementById("btnAddAccount").addEventListener("click", function (event) {
+    event.stopPropagation();
+    toggleVendorMenu();
   });
+  // 点击页面其它位置收起菜单（含菜单项自身——它在 closeVendorMenu 后已关闭）。
+  document.addEventListener("click", closeVendorMenu);
   document.getElementById("btnOpenUrl").addEventListener("click", function () {
     var url = document.getElementById("loginUrl").value;
     if (url) window.open(url, "_blank", "noopener");

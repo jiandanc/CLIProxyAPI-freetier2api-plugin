@@ -116,6 +116,8 @@ func staticModels(ctx context.Context) ([]pluginapi.ModelInfo, error) {
 			}
 			continue
 		}
+		// 缓存一份供管理页回读：管理页刷新是高频操作，不该每次都打上游。
+		cacheStaticModels(vendor.ID(), models)
 		all = append(all, filterDisabledModelsForVendor(vendor.ID(), models)...)
 	}
 	if len(all) == 0 && firstErr != nil {

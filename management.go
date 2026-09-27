@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"freetier2api-plugin/cpasdk/pluginabi"
@@ -286,19 +287,75 @@ type consoleModel struct {
 // nolint: revive // req 保留是为了与其它管理处理器签名一致。
 func handleModelsList(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
 	cfg := loadedConfig()
-	cached := workbuddy.CachedModels()
+	models := make([]consoleModel, 0, 128)
 
-	models := make([]consoleModel, 0, 64)
-	for _, region := range []workbuddy.Region{workbuddy.RegionCN, workbuddy.RegionGlobal} {
-		if !realmEnabled(cfg, string(region)) {
+	// 逐个供应商取模型。**不能只读 workbuddy 的缓存**——那会让 Qoder 的模型
+	// 在页面上完全看不到（它是另一个协议层的缓存）。
+	for _, vendor := range core.Vendors() {
+		if !realmEnabled(cfg, vendor.Region()) {
 			continue
 		}
-		for _, model := range cached[region] {
-			scopeID := PrefixModelID(region, model.ID)
-			models = append(models, consoleModel{
+		models = append(models, consoleModelsForVendor(vendor)...)
+	}
+
+	// 额外注册的模型（配置里的 extra_models）也一并展示。
+	for _, extra := range extraModels(cfg) {
+		vendorID, bare := core.SplitModelID(extra.ID)
+		if vendorID != "" {
+			if _, okVendor := core.VendorByID(vendorID); !okVendor {
+				continue
+			}
+		}
+		models = append(models, consoleModel{
+			ID:            bare,
+			ScopeID:       core.ModelKeyFor(vendorID, bare),
+			VendorID:      vendorID,
+			VendorName:    vendorNameFor(vendorID),
+			Realm:         vendorRegionFor(vendorID),
+			Name:          firstNonEmptyString(extra.DisplayName, extra.Name),
+			ContextLength: extra.ContextLength,
+		})
+	}
+
+	// 打上禁用标记供页面显示状态与勾选。
+	//
+	// 这里**不做过滤**：禁用的模型仍要列出来，否则用户看不到自己禁用了什么、
+	// 也无法再启用。真正生效的过滤在注册路径（models.go 的 staticModels）。
+	models = withDisabledFlag(models)
+	sort.Slice(models, func(i, j int) bool {
+		// 先按供应商名分组，组内按模型 ID —— 与账号表的排序口径一致。
+		if models[i].VendorName != models[j].VendorName {
+			return models[i].VendorName < models[j].VendorName
+		}
+		return models[i].ID < models[j].ID
+	})
+
+	payload := map[string]any{"ok": true, "models": models, "count": len(models)}
+	if len(models) == 0 {
+		// 缓存为空通常意味着还没探测过：给页面一句可执行的提示。
+		payload["error"] = "本地暂无模型缓存，正在从上游获取；也可点「从上游刷新」立即拉取。"
+	}
+	return jsonResponse(http.StatusOK, payload)
+}
+
+// consoleModelsForVendor 取某个供应商的模型清单（供控制台页展示）。
+//
+// 走协议层各自的缓存：WorkBuddy 的缓存按区域存（含上下文窗口与推理档位），
+// Qoder 的清单需要按凭证向上游拉（有内置兜底）。取不到时返回空——
+// 页面少显示几个模型比让整个模型页报错好。
+func consoleModelsForVendor(vendor core.Vendor) []consoleModel {
+	switch vendor.ID() {
+	case workbuddy.VendorIDCN, workbuddy.VendorIDGlobal:
+		region := workbuddy.NormalizeRegion(vendor.Region())
+		cached := workbuddy.CachedModels()[region]
+		out := make([]consoleModel, 0, len(cached))
+		for _, model := range cached {
+			out = append(out, consoleModel{
 				ID:              model.ID,
-				ScopeID:         scopeID,
-				Realm:           string(region),
+				ScopeID:         core.ModelKeyFor(vendor.ID(), model.ID),
+				VendorID:        vendor.ID(),
+				VendorName:      vendor.Name(),
+				Realm:           vendor.Region(),
 				Name:            model.Name,
 				Description:     model.Description,
 				ContextLength:   model.ContextWindow,
@@ -310,33 +367,57 @@ func handleModelsList(req pluginapi.ManagementRequest) pluginapi.ManagementRespo
 				Credits:         model.Credits,
 			})
 		}
+		return out
+	default:
+		// 其它供应商（Qoder）：从刚注册的模型清单回读。
+		// 这里不主动打上游——管理页的「读取模型清单」应当是轻量操作，
+		// 真正的上游探测由「从上游刷新」按钮触发。
+		return consoleModelsFromRegistry(vendor)
 	}
-	// 额外注册的模型（配置里的 extra_models）也一并展示。
-	for _, extra := range extraModels(cfg) {
-		r, bare := SplitModelID(extra.ID)
-		region := workbuddy.NormalizeRegion(r)
-		models = append(models, consoleModel{
-			ID:            bare,
-			ScopeID:       PrefixModelID(region, bare),
-			Realm:         string(region),
-			Name:          firstNonEmptyString(extra.DisplayName, extra.Name),
-			ContextLength: extra.ContextLength,
-		})
-	}
+}
 
-	// 打上禁用标记供页面显示状态与勾选。
-	//
-	// 这里**不做过滤**：禁用的模型仍要列出来，否则用户看不到自己禁用了什么、
-	// 也无法再启用。真正生效的过滤在注册路径（models.go 的 filterDisabledModels）。
-	models = withDisabledFlag(models)
-	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
-
-	payload := map[string]any{"ok": true, "models": models, "count": len(models)}
-	if len(models) == 0 {
-		// 缓存为空通常意味着还没探测过：给页面一句可执行的提示。
-		payload["error"] = "本地暂无模型缓存，正在从上游获取；也可点「从上游刷新」立即拉取。"
+// consoleModelsFromRegistry 从插件注册表里已有的模型清单回读某个供应商的模型。
+//
+// 数据源与 model.static 相同（宿主已持有），因此不会额外打上游。
+func consoleModelsFromRegistry(vendor core.Vendor) []consoleModel {
+	infos := registeredModelsForVendor(vendor.ID())
+	out := make([]consoleModel, 0, len(infos))
+	for _, info := range infos {
+		entry := consoleModel{
+			ID:              info.ID,
+			ScopeID:         core.ModelKeyFor(vendor.ID(), info.ID),
+			VendorID:        vendor.ID(),
+			VendorName:      vendor.Name(),
+			Realm:           vendor.Region(),
+			Name:            firstNonEmptyString(info.DisplayName, info.Name),
+			Description:     info.Description,
+			ContextLength:   info.ContextLength,
+			MaxOutputTokens: info.MaxCompletionTokens,
+			SupportsImages:  modelSupportsImages(info),
+			SupportsTools:   modelSupportsTools(info),
+		}
+		if info.Thinking != nil {
+			entry.Efforts = info.Thinking.Levels
+		}
+		out = append(out, entry)
 	}
-	return jsonResponse(http.StatusOK, payload)
+	return out
+}
+
+// vendorNameFor 返回供应商展示名（未知 id 返回空串）。
+func vendorNameFor(vendorID string) string {
+	if vendor, okVendor := core.VendorByID(vendorID); okVendor {
+		return vendor.Name()
+	}
+	return ""
+}
+
+// vendorRegionFor 返回供应商的区域（未知 id 返回空串）。
+func vendorRegionFor(vendorID string) string {
+	if vendor, okVendor := core.VendorByID(vendorID); okVendor {
+		return vendor.Region()
+	}
+	return ""
 }
 
 // buildStatusPayload 构造账号状态概览。
@@ -376,9 +457,13 @@ func buildStatusPayload(req pluginapi.ManagementRequest) map[string]any {
 
 // accountSummary 是账号概览条目（不含凭证）。
 type accountSummary struct {
-	AuthID      string         `json:"auth_id"`
-	AuthIndex   string         `json:"auth_index"`
-	Label       string         `json:"label"`
+	AuthID    string `json:"auth_id"`
+	AuthIndex string `json:"auth_index"`
+	Label     string `json:"label"`
+	// VendorID 是供应商实例（workbuddycn 等），页面据此分组与展示。
+	VendorID string `json:"vendor_id"`
+	// VendorName 是供应商展示名（如「Qoder 国内版」）。
+	VendorName  string         `json:"vendor_name"`
 	Realm       string         `json:"realm"`
 	Status      string         `json:"status"`
 	Disabled    bool           `json:"disabled"`
@@ -394,7 +479,6 @@ func listAccountSummaries(ctx context.Context, callbackID string) []accountSumma
 		return nil
 	}
 	state := snapshotState()
-	cfg := loadedConfig()
 
 	out := make([]accountSummary, 0, len(entries))
 	seenIndex := make(map[string]int)
@@ -417,7 +501,9 @@ func listAccountSummaries(ctx context.Context, callbackID string) []accountSumma
 			}
 		}
 
-		// realm 从凭证里读；读不到时按配置兜底。
+		// 归属与区域都从凭证本身解析（交给命中的供应商），
+		// 不能拿固定的解析器去解所有凭证——Qoder 的凭证用 WorkBuddy 的
+		// 解析器会失败，表现为页面上「凭证解析失败」。
 		var accountUID string
 		if raw, filePath, okRaw := getAuthJSONAndPathByIndex(ctx, callbackID, entry.AuthIndex); okRaw {
 			if modTime.IsZero() && filePath != "" {
@@ -425,10 +511,15 @@ func listAccountSummaries(ctx context.Context, callbackID string) []accountSumma
 					modTime = fi.ModTime()
 				}
 			}
-			if credential, errParse := workbuddy.ParseCredential(raw, defaultRealmForParse(cfg)); errParse == nil {
-				summary.Realm = string(credential.Realm())
-				if nickname := credential.NicknameValue(); nickname != "" {
-					summary.Label = nickname
+			// 按凭证归属解析；解不出时保留宿主给的 provider 作为兜底展示。
+			if credential, okParse := parseVendorCredential(raw, entry.Name, nil); okParse {
+				summary.VendorID = credential.VendorIDValue()
+				summary.Realm = credential.RegionValue()
+				if vendor, okVendor := core.VendorByID(summary.VendorID); okVendor {
+					summary.VendorName = vendor.Name()
+				}
+				if label := credential.LabelValue(); label != "" {
+					summary.Label = label
 				}
 				if uid := credential.UIDValue(); uid != "" {
 					accountUID = uid
@@ -450,9 +541,8 @@ func listAccountSummaries(ctx context.Context, callbackID string) []accountSumma
 		if !modTime.IsZero() {
 			summary.RefreshedAt = modTime.Format(time.RFC3339)
 		}
-		if summary.Realm == "" {
-			summary.Realm = string(defaultRealmForParse(cfg))
-		}
+		// 归属解析不出来的账号保留空值：页面会退回显示宿主给的 provider 名，
+		// 硬塞一个默认区域会让用户以为它属于某个供应商（实际并没有）。
 
 		// 账号唯一键：优先使用账号 UID，兜底使用规范化后的 AuthID
 		dedupKey := accountUID
@@ -1040,4 +1130,41 @@ func buildVendorsPayload() map[string]any {
 		})
 	}
 	return map[string]any{"ok": true, "vendors": vendors}
+}
+
+// registeredModelsForVendor 返回某个供应商当前注册给宿主的模型清单。
+//
+// 数据来自插件自己的模型目录（与 model.static 同源），因此不会额外打上游——
+// 管理页的「读取模型清单」应当是轻量操作。
+func registeredModelsForVendor(vendorID string) []pluginapi.ModelInfo {
+	return cachedStaticModels()[vendorID]
+}
+
+// staticModelsCache 缓存最近一次 staticModels 的结果，供管理页回读。
+//
+// 为什么不直接调 vendor.StaticModels：那会打上游（Qoder 需要建 cosy 会话），
+// 而管理页刷新是高频操作。模型注册路径已经拉过一次，这里复用它的结果。
+var (
+	staticModelsMu    sync.RWMutex
+	staticModelsCache = map[string][]pluginapi.ModelInfo{}
+)
+
+// cacheStaticModels 记录某个供应商的模型清单（由注册路径调用）。
+func cacheStaticModels(vendorID string, models []pluginapi.ModelInfo) {
+	staticModelsMu.Lock()
+	defer staticModelsMu.Unlock()
+	staticModelsCache[vendorID] = models
+}
+
+// cachedStaticModels 返回缓存的模型清单副本。
+func cachedStaticModels() map[string][]pluginapi.ModelInfo {
+	staticModelsMu.RLock()
+	defer staticModelsMu.RUnlock()
+	out := make(map[string][]pluginapi.ModelInfo, len(staticModelsCache))
+	for vendorID, models := range staticModelsCache {
+		copied := make([]pluginapi.ModelInfo, len(models))
+		copy(copied, models)
+		out[vendorID] = copied
+	}
+	return out
 }
