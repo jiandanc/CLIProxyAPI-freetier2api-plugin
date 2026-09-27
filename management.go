@@ -21,6 +21,7 @@ import (
 
 	"freetier2api-plugin/cpasdk/pluginabi"
 	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/core"
 	"freetier2api-plugin/internal/httpx"
 	"freetier2api-plugin/internal/logger"
 	"freetier2api-plugin/internal/vendors/workbuddy"
@@ -38,6 +39,7 @@ func managementRegistration() pluginapi.ManagementRegistrationResponse {
 	return pluginapi.ManagementRegistrationResponse{
 		Routes: []pluginapi.ManagementRoute{
 			{Method: "GET", Path: managementRoutePrefix + "/status", Description: "账号、额度与任务状态概览。"},
+			{Method: "GET", Path: managementRoutePrefix + "/vendors", Description: "列出已启用的供应商（供添加账号下拉与分组展示）。"},
 			{Method: "POST", Path: managementRoutePrefix + "/checkin", Description: "对指定或全部账号执行签到。"},
 			{Method: "POST", Path: managementRoutePrefix + "/quotas", Description: "批量查询账号额度。"},
 			{Method: "GET", Path: managementRoutePrefix + "/models", Description: "读取当前注册的模型清单。"},
@@ -87,6 +89,9 @@ func handleManagement(request []byte) ([]byte, error) {
 
 	case method == http.MethodGet && matchesManagementPath(rpc.Path, "/status"):
 		return okEnvelope(jsonResponse(http.StatusOK, buildStatusPayload(rpc)))
+
+	case method == http.MethodGet && matchesManagementPath(rpc.Path, "/vendors"):
+		return okEnvelope(jsonResponse(http.StatusOK, buildVendorsPayload()))
 
 	case method == http.MethodGet && matchesManagementPath(rpc.Path, "/logs"):
 		return okEnvelope(jsonResponse(http.StatusOK, buildLogsPayload(rpc)))
@@ -1003,4 +1008,36 @@ func handleSchoolStatus(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 	defer cancel()
 	statuses := schoolStatusForAccounts(ctx, hostCallbackID(req))
 	return jsonResponse(http.StatusOK, map[string]any{"ok": true, "accounts": statuses})
+}
+
+// vendorDescriptor 是供应商的展示描述（供页面下拉与分组用）。
+type vendorDescriptor struct {
+	// ID 是供应商实例标识（workbuddycn 等），页面用它发起登录与筛选。
+	ID string `json:"id"`
+	// Name 是展示名（如「WorkBuddy 国内版」）。
+	Name string `json:"name"`
+	// Region 是区域标识（cn / global）。
+	Region string `json:"region"`
+	// SupportsCheckin 报告该供应商是否提供签到（页面据此隐藏入口）。
+	SupportsCheckin bool `json:"supports_checkin"`
+}
+
+// buildVendorsPayload 返回已启用的供应商清单。
+//
+// 页面据此渲染「添加账号」下拉与账号表分组，因此新增供应商不需要改 HTML。
+func buildVendorsPayload() map[string]any {
+	cfg := loadedConfig()
+	vendors := make([]vendorDescriptor, 0, 4)
+	for _, vendor := range core.Vendors() {
+		if !realmEnabled(cfg, vendor.Region()) {
+			continue
+		}
+		vendors = append(vendors, vendorDescriptor{
+			ID:              vendor.ID(),
+			Name:            vendor.Name(),
+			Region:          vendor.Region(),
+			SupportsCheckin: vendor.SupportsCheckin(),
+		})
+	}
+	return map[string]any{"ok": true, "vendors": vendors}
 }

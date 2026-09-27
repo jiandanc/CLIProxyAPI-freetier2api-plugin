@@ -105,8 +105,8 @@ progress { width: 160px; height: 8px; }
     <div class="card">
       <h2>账号概览 <span class="muted" id="accountCount"></span></h2>
       <div class="row">
-        <button class="act primary" id="btnAddCn">添加国内账号</button>
-        <button class="act primary" id="btnAddGlobal">添加海外账号</button>
+        <select id="addVendor" style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px"></select>
+        <button class="act primary" id="btnAddAccount">添加账号</button>
         <button class="act" id="btnRefresh">Token续期</button>
         <button class="act" id="btnLoadQuotas">查询额度</button>
         <button class="act" id="btnCheckin">一键签到</button>
@@ -139,7 +139,7 @@ progress { width: 160px; height: 8px; }
         <label>筛选 <input type="text" id="modelFilter" placeholder="如 glm / gpt" style="width:160px"></label>
       </div>
       <div class="hint">
-        对外同名模型自动合并；支持按国内 (WorkBuddyCN) / 海外 (WorkBuddyGLOBAL) 独立启用或禁用。
+        对外同名模型自动合并；支持按供应商独立启用或禁用。
       </div>
       <div id="models"></div>
     </div>
@@ -396,6 +396,44 @@ progress { width: 160px; height: 8px; }
     if (node) node.textContent = text === undefined || text === null ? "" : String(text);
   }
 
+  // ---- 供应商表 ----
+  //
+  // 页面不硬编码供应商名：全部来自后端的 /vendors。这样新增供应商
+  // 不需要改 HTML，也不会出现「后端有、页面认不出」的错配。
+  var vendorsById = {};
+  var vendorsLoaded = false;
+
+  function loadVendors() {
+    return api("GET", "/vendors").then(function (data) {
+      var list = (data && data.vendors) || [];
+      vendorsById = {};
+      var select = document.getElementById("addVendor");
+      if (select) select.textContent = "";
+      list.forEach(function (vendor) {
+        vendorsById[vendor.id] = vendor;
+        if (select) {
+          var option = document.createElement("option");
+          option.value = vendor.id;
+          option.textContent = vendor.name;
+          select.appendChild(option);
+        }
+      });
+      vendorsLoaded = true;
+      return list;
+    }).catch(function (err) {
+      // 供应商列表拉不到不该让整页失效：账号表退化成显示原始 id。
+      return [];
+    });
+  }
+
+  // vendorLabel 返回供应商展示名；未知 id 时退回 id 本身。
+  function vendorLabel(vendorID, realm) {
+    if (vendorID && vendorsById[vendorID]) return vendorsById[vendorID].name;
+    if (vendorID) return vendorID;
+    // 旧数据可能只有 realm：拼一个可读的回退名。
+    return realm === "global" ? "global" : "cn";
+  }
+
   // ---- 账号视图 ----
 
   // lastStatus / quotaByAuth 让额度查询结果能并入账号表，
@@ -414,8 +452,8 @@ progress { width: 160px; height: 8px; }
     }
     // 排序：供应商名称 + 账号 ID（同一供应商聚合展示，供应商内按账号 ID 升序）
     accounts.sort(function (a, b) {
-      var vendorA = (a.realm === "global") ? "WorkBuddyGLOBAL" : "WorkBuddyCN";
-      var vendorB = (b.realm === "global") ? "WorkBuddyGLOBAL" : "WorkBuddyCN";
+      var vendorA = vendorLabel(a.vendor_id, a.realm);
+      var vendorB = vendorLabel(b.vendor_id, b.realm);
       if (vendorA !== vendorB) {
         return vendorA < vendorB ? -1 : 1;
       }
@@ -436,7 +474,7 @@ progress { width: 160px; height: 8px; }
     accounts.forEach(function (account) {
       var row = el("tr");
       var isGlobal = (account.realm === "global");
-      var vendor = isGlobal ? "WorkBuddyGLOBAL" : "WorkBuddyCN";
+      var vendor = vendorLabel(account.vendor_id, account.realm);
       var vendorCell = el("td");
       vendorCell.appendChild(pill(vendor, isGlobal ? "" : "warn"));
       row.appendChild(vendorCell);
@@ -559,9 +597,8 @@ progress { width: 160px; height: 8px; }
     var filter = (document.getElementById("modelFilter").value || "").trim().toLowerCase();
     var list = allModels.filter(function (m) {
       if (!filter) return true;
-      var isGlobal = (m.realm === "global" || String(m.scope_id || "").indexOf("global:") === 0);
-      var vendor = isGlobal ? "workbuddyglobal 海外" : "workbuddycn 国内";
-      var bareID = String(m.id || "").replace(/^(cn|global):/, "");
+      var vendor = vendorLabel(m.vendor_id, m.realm);
+      var bareID = String(m.id || "");
       var text = (bareID + " " + String(m.name || "") + " " + vendor).toLowerCase();
       return text.indexOf(filter) >= 0;
     });
@@ -571,10 +608,8 @@ progress { width: 160px; height: 8px; }
       var statusB = b.disabled ? 1 : 0;
       if (statusA !== statusB) return statusA - statusB;
 
-      var isGlobalA = (a.realm === "global" || String(a.scope_id || "").indexOf("global:") === 0);
-      var vendorA = isGlobalA ? "WorkBuddyGLOBAL" : "WorkBuddyCN";
-      var isGlobalB = (b.realm === "global" || String(b.scope_id || "").indexOf("global:") === 0);
-      var vendorB = isGlobalB ? "WorkBuddyGLOBAL" : "WorkBuddyCN";
+      var vendorA = vendorLabel(a.vendor_id, a.realm);
+      var vendorB = vendorLabel(b.vendor_id, b.realm);
       if (vendorA !== vendorB) {
         return vendorA < vendorB ? -1 : 1;
       }
@@ -613,14 +648,13 @@ progress { width: 160px; height: 8px; }
       row.appendChild(checkCell);
 
       // 供应商列
-      var isGlobal = (model.realm === "global" || String(model.scope_id || "").indexOf("global:") === 0);
-      var vendor = isGlobal ? "WorkBuddyGLOBAL" : "WorkBuddyCN";
+      var vendor = vendorLabel(model.vendor_id, model.realm);
       var vendorCell = el("td");
       vendorCell.appendChild(pill(vendor, isGlobal ? "" : "warn"));
       row.appendChild(vendorCell);
 
       // 模型 ID 列（去除 cn: / global: 前缀，显示裸名）
-      var bareID = String(model.id || "").replace(/^(cn|global):/, "");
+      var bareID = String(model.id || "");
       row.appendChild(el("td", bareID, "mono"));
 
       row.appendChild(el("td", model.name || "—"));
@@ -710,7 +744,7 @@ progress { width: 160px; height: 8px; }
     if (!accounts.length) return;
     accounts.forEach(function (scan) {
       var card = el("div", null, "card");
-      card.appendChild(el("h2", (scan.label || scan.uid) + " · " + (scan.realm === "global" ? "国际版" : "国内版")));
+      card.appendChild(el("h2", (scan.label || scan.uid) + " · " + vendorLabel(scan.vendor_id, scan.realm)));
       if (scan.error) card.appendChild(el("div", scan.error, "muted"));
       var pending = (scan.growth || []).concat(scan.school || []);
       if (!pending.length) {
@@ -831,7 +865,7 @@ progress { width: 160px; height: 8px; }
     if (loginTimer) { clearInterval(loginTimer); loginTimer = null; }
   }
 
-  function startLogin(realm) {
+  function startLogin(vendorID) {
     stopLoginPolling();
     var box = document.getElementById("loginBox");
     var urlField = document.getElementById("loginUrl");
@@ -840,7 +874,10 @@ progress { width: 160px; height: 8px; }
     urlField.value = "";
     status.textContent = "正在获取授权链接…";
 
-    api("GET", hostPath("/workbuddy-auth-url?realm=" + encodeURIComponent(realm))).then(function (data) {
+    // 供应商经 metadata 传给插件：宿主按路径解析 provider（/freetier-auth-url），
+    // 插件再按 vendor 参数选具体供应商实例。路径里不能带 vendor——
+    // 宿主会把它当成 provider 名去校验，直接 404。
+    api("GET", hostPath("/freetier-auth-url?vendor=" + encodeURIComponent(vendorID))).then(function (data) {
       if (!data || !data.url) {
         status.textContent = "获取授权链接失败：" + ((data && data.error) || "响应缺少 url");
         return;
@@ -890,8 +927,15 @@ progress { width: 160px; height: 8px; }
     }, 2000);
   }
 
-  document.getElementById("btnAddCn").addEventListener("click", function () { startLogin("cn"); });
-  document.getElementById("btnAddGlobal").addEventListener("click", function () { startLogin("global"); });
+  document.getElementById("btnAddAccount").addEventListener("click", function () {
+    var select = document.getElementById("addVendor");
+    var vendorID = select.value;
+    if (!vendorID) {
+      banner("warn", "没有可用的供应商，请检查插件配置的 enabled_realms。");
+      return;
+    }
+    startLogin(vendorID);
+  });
   document.getElementById("btnOpenUrl").addEventListener("click", function () {
     var url = document.getElementById("loginUrl").value;
     if (url) window.open(url, "_blank", "noopener");
@@ -1040,10 +1084,14 @@ progress { width: 160px; height: 8px; }
         ? "检测到面板保存的密钥但无法解码（通常是浏览器版本变化导致），请手动填入一次"
         : "面板未保存密钥（未勾选「记住密码」），请手动填入一次");
     }
-    loadModels(true);   // 进入页面自动获取模型清单
-    loadLogs(true);     // 进入页面自动拉一次日志
-    // 串行：账号表先渲染，额度再填充（并行会被"查询中"覆盖）。
-    loadStatus().then(function () { loadQuotas(true); });
+    // 供应商表要最先拉：账号表与模型表的展示名都依赖它，
+    // 否则首屏会先闪一下原始 id 再变成展示名。
+    loadVendors().then(function () {
+      loadModels(true);   // 进入页面自动获取模型清单
+      loadLogs(true);     // 进入页面自动拉一次日志
+      // 串行：账号表先渲染，额度再填充（并行会被"查询中"覆盖）。
+      loadStatus().then(function () { loadQuotas(true); });
+    });
   })();
 })();
 </script>

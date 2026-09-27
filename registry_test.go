@@ -210,12 +210,12 @@ func TestConsolePageWiresHostOAuthLogin(t *testing.T) {
 	page := consolePageHTML(managementRoutePrefix)
 
 	for _, literal := range []string{
-		"/workbuddy-auth-url", // 与 providerKey 拼接，宿主按此匹配 auth provider
-		"get-auth-status",     // 宿主提供的状态轮询端点
-		`id="btnAddCn"`,       // 国内版入口
-		`id="btnAddGlobal"`,   // 国际版入口
-		"startLogin",          // 登录流程
-		"pollLogin",           // 轮询流程
+		"/freetier-auth-url", // 与 providerKey 拼接，宿主按此匹配 auth provider
+		"get-auth-status",    // 宿主提供的状态轮询端点
+		`id="addVendor"`,     // 供应商下拉（替代原先的两个固定按钮）
+		`id="btnAddAccount"`, // 添加账号入口
+		"startLogin",         // 登录流程
+		"pollLogin",          // 轮询流程
 	} {
 		if !strings.Contains(page, literal) {
 			t.Fatalf("console page is missing the add-account wiring (%s)", literal)
@@ -227,16 +227,20 @@ func TestConsolePageWiresHostOAuthLogin(t *testing.T) {
 	if !strings.Contains(page, "hostPath(") {
 		t.Fatal("host-level OAuth endpoints must not be prefixed with the plugin path")
 	}
-	if strings.Contains(page, `api("GET", "/workbuddy-auth-url`) {
+	if strings.Contains(page, `api("GET", "/freetier-auth-url`) {
 		t.Fatal("auth-url must go through hostPath() (the host extracts the provider from the path)")
 	}
 	if !strings.Contains(page, `var HOST_MGMT = "/v0/management"`) {
 		t.Fatal("console page must know the host management prefix")
 	}
 
-	// 域必须区分：两域凭证不通用，登录入口必须能选。
-	if !strings.Contains(page, `startLogin("cn")`) || !strings.Contains(page, `startLogin("global")`) {
-		t.Fatal("console page must offer both cn and global login entries")
+	// 供应商必须可选：页面从 /vendors 拉清单填进下拉，且登录时把 vendor
+	// 作为参数传给宿主（宿主只认路径里的 provider，选哪家由插件按参数决定）。
+	if !strings.Contains(page, "loadVendors") {
+		t.Fatal("console page must load the vendor list from the backend")
+	}
+	if !strings.Contains(page, "vendor=") {
+		t.Fatal("console page must pass the selected vendor to the host login endpoint")
 	}
 }
 
