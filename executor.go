@@ -12,6 +12,7 @@ import (
 
 	"freetier2api-plugin/cpasdk/pluginabi"
 	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/core"
 	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/httpx"
 	"freetier2api-plugin/internal/logger"
@@ -215,14 +216,32 @@ func isChatFormat(format string) bool {
 // 会话键来自请求体（客户端传的会话标识，或由 system+首条 user 派生），
 // 同一次请求内所有重试共用同一组头——上游后台按 X-Conversation-Request-ID 聚合。
 func chatMetaFor(rpc executorRPCRequest) workbuddy.ChatMeta {
-	body := rpc.Payload
+	return chatMetaFromBody(rpc.Payload, rpc.Headers)
+}
+
+// chatMetaForExecuteRequest 从 vendor 适配层的执行请求派生会话头族。
+//
+// 与 chatMetaFor 同源，只是入参形态不同：适配层拿到的是已解好的
+// core.ExecuteRequest，不需要再经 executorRPCRequest。
+func chatMetaForExecuteRequest(req *core.ExecuteRequest) workbuddy.ChatMeta {
+	if req == nil {
+		return workbuddy.ChatMeta{}
+	}
+	return chatMetaFromBody(req.Payload, http.Header(req.Headers))
+}
+
+// chatMetaFromBody 从请求体与请求头派生会话头族。
+//
+// 会话键从请求体里提取（客户端可能指定了 conversation/message id），
+// 缺失时由 turnKey 兜底——上游要求 ConversationRequestID 必发。
+func chatMetaFromBody(body []byte, headers http.Header) workbuddy.ChatMeta {
 	conversationKey := workbuddy.ConversationKey(body)
 	turnKey := workbuddy.TurnKey(body)
 
 	// 入站透传的链路 ID 优先（调用方可能已经建好了链路）。
 	traceID := ""
-	if rpc.Headers != nil {
-		traceID = strings.TrimSpace(rpc.Headers.Get("X-Trace-ID"))
+	if headers != nil {
+		traceID = strings.TrimSpace(headers.Get("X-Trace-ID"))
 	}
 
 	conversationRequestID := ""

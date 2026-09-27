@@ -71,6 +71,39 @@ var (
 	loginStoreLastGC time.Time
 )
 
+// storeLoginSession 记录一次进行中的登录会话（含过期 GC）。
+func storeLoginSession(sessionID string, session *pendingLogin) {
+	loginStoreMu.Lock()
+	gcLoginSessionsLocked()
+	loginStore[sessionID] = session
+	loginStoreMu.Unlock()
+}
+
+// takeLoginSession 取出登录会话，同时应用节流。
+//
+// 节流是必要的：控制台页会频繁轮询，但不该每次都打上游。
+// 返回 ok=false 表示会话不存在或已过期。
+func takeLoginSession(sessionID string) (*pendingLogin, bool) {
+	loginStoreMu.Lock()
+	defer loginStoreMu.Unlock()
+	session, okSession := loginStore[sessionID]
+	if okSession && time.Since(session.createdAt) > loginSessionTTL {
+		delete(loginStore, sessionID)
+		return nil, false
+	}
+	if !okSession {
+		return nil, false
+	}
+	if time.Since(session.lastPoll) < loginPollMinGap {
+		// 仍在节流窗口内：返回会话但标记为「本轮不打上游」。
+		// 调用方据 lastPoll 判断——这里直接返回 pending 由调用方处理更清晰，
+		// 因此用一个零值 lastPoll 表示需要等待。
+		return session, false
+	}
+	session.lastPoll = time.Now()
+	return session, true
+}
+
 // handleAuthLoginStart 开始一次登录，返回用户需要打开的授权链接。
 //
 // 域从请求的 Metadata 里取（控制台页会让用户选国内版还是国际版）；

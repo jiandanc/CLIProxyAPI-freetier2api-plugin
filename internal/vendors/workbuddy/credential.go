@@ -514,3 +514,34 @@ func fileNameMatchesConvention(fileName string) bool {
 //
 // 唯一来源是 core.ProviderKey（core 不 import vendors，因此这里引用它不成环）。
 const ProviderKey = core.ProviderKey
+
+// RegionForCredential 从凭证 JSON 推断所属区域，推断不出返回空。
+//
+// 判定顺序：嵌套形的 auth.realm → auth.domain 后缀 → 扁平形的 realm → domain 后缀。
+// 导出给根层的 vendor 适配器用：凭证归属判定需要它，而判定逻辑属于协议层。
+func RegionForCredential(raw map[string]any) Region {
+	if raw == nil {
+		return ""
+	}
+	if nested, okNested := raw["auth"].(map[string]any); okNested {
+		if realm := realmField(nested); realm != "" {
+			return realm
+		}
+	}
+	return realmField(raw)
+}
+
+// realmField 从一层 JSON 里读区域：先看显式 realm 字段，再看 domain 后缀。
+func realmField(level map[string]any) Region {
+	if realm, okRealm := level["realm"].(string); okRealm && strings.TrimSpace(realm) != "" {
+		if strict := normalizeRealmStrict(realm); strict != "" {
+			return strict
+		}
+	}
+	if domain, okDomain := level["domain"].(string); okDomain {
+		if inferred := realmFromDomain(domain); inferred != "" {
+			return inferred
+		}
+	}
+	return ""
+}
