@@ -615,24 +615,30 @@ func handleCheckinRequest(req pluginapi.ManagementRequest) pluginapi.ManagementR
 	ctx, cancel := managementContext(req)
 	defer cancel()
 
-	results := runForAccounts(ctx, hostCallbackID(req), body.AccountIDs, func(ctx context.Context, credential *workbuddy.Credential) (string, error) {
-		client := newUpstreamClient(ctx)
-		result, errCheckin := client.DailyCheckin(credential)
-		if errCheckin != nil {
-			return "", errCheckin
-		}
-		recordCheckinResult(credential, result)
-		if result.Already {
-			return "今天已签到（幂等）", nil
-		}
-		return fmt.Sprintf("签到成功：+%d 积分 +%d 能量，连续 %d 天",
-			result.Credit, result.Energy, result.Streak), nil
-	})
+	results := runForAccounts(ctx, hostCallbackID(req), body.AccountIDs,
+		func(ctx context.Context, vendor core.Vendor, credential *core.Credential) (string, error) {
+			if !vendor.SupportsCheckin() {
+				return "", fmt.Errorf("%s 不提供签到", vendor.Name())
+			}
+			result, errCheckin := vendor.Checkin(ctx, credential)
+			if errCheckin != nil {
+				return "", errCheckin
+			}
+			if result == nil {
+				return "", fmt.Errorf("签到未返回结果")
+			}
+			recordCheckinResult(credential, result)
+			return result.Message, nil
+		})
 	return jsonResponse(http.StatusOK, map[string]any{"ok": true, "results": results})
 }
 
 // recordCheckinResult 把签到结果写入状态。
-func recordCheckinResult(credential *workbuddy.Credential, result *workbuddy.CheckinResult) {
+// recordCheckinResult 把一次签到结果写进状态（供页面展示）。
+//
+// 接收中立的 core.CheckinResult：各家的签到结果字段不同（WorkBuddy 有积分+
+// 能量，Qoder 只有 credits），状态里只记两家都有的部分。
+func recordCheckinResult(credential *core.Credential, result *core.CheckinResult) {
 	if credential == nil || result == nil {
 		return
 	}
@@ -644,9 +650,6 @@ func recordCheckinResult(credential *workbuddy.Credential, result *workbuddy.Che
 	mutateState(func(state *pluginState) {
 		record := state.Checkin[uid]
 		record.LastDate = today
-		if result.Streak > 0 {
-			record.Streak = result.Streak
-		}
 		if result.Credit > 0 {
 			record.Credit = result.Credit
 		}
@@ -662,14 +665,24 @@ func recordCheckinResult(credential *workbuddy.Credential, result *workbuddy.Che
 // 刻意返回**结构化数据**而不是一句文字：控制台页要把额度并入账号表，
 // 需要 remain/total/packages 这些字段；只回 message 的话页面无从渲染。
 type quotaResult struct {
-	AuthID   string `json:"auth_id"`
-	Label    string `json:"label"`
-	Realm    string `json:"realm"`
-	OK       bool   `json:"ok"`
-	Message  string `json:"message,omitempty"`
-	Remain   int64  `json:"remain"`
-	Total    int64  `json:"total"`
-	Packages string `json:"packages,omitempty"`
+	AuthID string `json:"auth_id"`
+	Label  string `json:"label"`
+	// VendorID / VendorName 让页面把额度归到正确的供应商分组下。
+	VendorID   string `json:"vendor_id,omitempty"`
+	VendorName string `json:"vendor_name,omitempty"`
+	Realm      string `json:"realm"`
+	OK         bool   `json:"ok"`
+	Message    string `json:"message,omitempty"`
+	// Summary 是额度摘要（各家的额度模型不同，用统一的可读文字表达）。
+	Summary string `json:"summary,omitempty"`
+	// Remain / Total 是归一化的「剩余 / 总额」两个数字，供页面的
+	// 「剩余/总额 + 使用率进度条」渲染。各家的额度口径不同，因此在适配层
+	// 统一折算到这里；取不到时两者都留 0，页面显示 "—"。
+	Remain int64 `json:"remain"`
+	Total  int64 `json:"total"`
+	// Metrics 是原始关键指标（宿主的 QuotaMetric 形态），
+	// 供需要看细分的场景使用。
+	Metrics []pluginapi.QuotaMetric `json:"metrics,omitempty"`
 }
 
 // handleQuotasRequest 批量查询额度。
@@ -694,10 +707,10 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 		wanted[strings.TrimSpace(target)] = true
 	}
 
-	cfg := loadedConfig()
 	type job struct {
 		entry      hostAuthEntry
-		credential *workbuddy.Credential
+		vendor     core.Vendor
+		credential *core.Credential
 	}
 	var preResults []quotaResult
 	jobs := make([]job, 0, len(entries))
@@ -734,17 +747,19 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 			})
 			continue
 		}
-		credential, errParse := workbuddy.ParseCredential(raw, defaultRealmForParse(cfg))
-		if errParse != nil {
+		// 按凭证归属分发解析：拿固定解析器解所有凭证会让另一家的凭证
+		// 报「凭证解析失败」（例如 Qoder 的凭证用 WorkBuddy 的结构去解）。
+		credential, vendor, errResolve := resolveVendorCredential(ctx, callbackID, raw, entry.AuthIndex, nil)
+		if errResolve != nil {
 			preResults = append(preResults, quotaResult{
 				AuthID:  firstNonEmptyString(entry.ID, entry.Name),
 				Label:   firstNonEmptyString(entry.Label, entry.Name, entry.ID),
 				OK:      false,
-				Message: "凭证解析失败: " + errParse.Error(),
+				Message: "凭证解析失败: " + errResolve.Error(),
 			})
 			continue
 		}
-		jobs = append(jobs, job{entry: entry, credential: credential})
+		jobs = append(jobs, job{entry: entry, vendor: vendor, credential: credential})
 	}
 
 	jobResults := make([]quotaResult, len(jobs))
@@ -756,19 +771,21 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 			defer func() { <-semaphore }()
 			current := jobs[slot]
 			result := quotaResult{
-				AuthID: firstNonEmptyString(current.entry.ID, current.entry.Name),
-				Label:  firstNonEmptyString(current.credential.NicknameValue(), current.entry.Label, current.entry.Name),
-				Realm:  string(current.credential.Realm()),
+				AuthID:   firstNonEmptyString(current.entry.ID, current.entry.Name),
+				Label:    firstNonEmptyString(current.credential.LabelValue(), current.entry.Label, current.entry.Name),
+				VendorID: current.vendor.ID(),
+				Realm:    current.credential.RegionValue(),
 			}
-			client := newUpstreamClient(ctx)
-			balance, errBalance := client.FetchBalance(current.credential)
-			if errBalance != nil {
-				result.Message = errBalance.Error()
+			// 额度取数交给供应商：各家的额度接口与归一方式完全不同
+			// （WorkBuddy 是积分余额，Qoder 是套餐用量桶）。
+			quota, errQuota := current.vendor.Quota(ctx, current.credential)
+			if errQuota != nil {
+				result.Message = errQuota.Error()
 			} else {
 				result.OK = true
-				result.Remain = balance.Remain
-				result.Total = balance.Total
-				result.Packages = summarizePackages(balance)
+				result.Summary = summarizeQuotaMetrics(quota)
+				result.Remain, result.Total = normalizeQuotaNumbers(quota)
+				result.Metrics = quota.Summary
 			}
 			jobResults[slot] = result
 			done <- slot
@@ -781,35 +798,59 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 	return jsonResponse(http.StatusOK, map[string]any{"ok": true, "results": finalResults})
 }
 
-// summarizePackages 把资源包明细压成一行文字（供表格展示）。
-func summarizePackages(balance *workbuddy.Balance) string {
-	if balance == nil || len(balance.Packages) == 0 {
+// summarizeQuotaMetrics 把归一的额度响应压成一行文字（供账号表展示）。
+//
+// 优先用 Summary 里的指标（那是各家自己定义的关键数字），没有时退回分组明细。
+func summarizeQuotaMetrics(quota *pluginapi.QuotaFetchResponse) string {
+	if quota == nil {
 		return ""
 	}
-	parts := make([]string, 0, len(balance.Packages))
-	for _, pkg := range balance.Packages {
-		name := strings.TrimSpace(pkg.Name)
-		if name == "" {
-			name = "资源包"
+	parts := make([]string, 0, len(quota.Summary)+2)
+	for _, metric := range quota.Summary {
+		label := strings.TrimSpace(metric.Label)
+		if label == "" {
+			label = metric.Key
 		}
-		parts = append(parts, fmt.Sprintf("%s %d/%d", name, pkg.Remain, pkg.Total))
+		parts = append(parts, fmt.Sprintf("%s %s", label, formatMetricValue(metric.Value)))
+	}
+	for _, group := range quota.Groups {
+		for _, bucket := range group.Buckets {
+			label := strings.TrimSpace(group.DisplayName)
+			if label == "" {
+				label = bucket.Window
+			}
+			parts = append(parts, fmt.Sprintf("%s %s", label, bucket.Description))
+		}
 	}
 	return strings.Join(parts, " · ")
 }
 
+// formatMetricValue 把指标数值格式化成可读文本。
+//
+// 额度值都是整数或一位小数，用 %g 会输出 1.5e+06 这种科学计数法，
+// 在表格里很难看。
+func formatMetricValue(value float64) string {
+	if value == float64(int64(value)) {
+		return strconv.FormatInt(int64(value), 10)
+	}
+	return strconv.FormatFloat(value, 'f', 2, 64)
+}
+
 // accountActionResult 是单账号操作的执行结果。
 type accountActionResult struct {
-	AuthID  string `json:"auth_id"`
-	Label   string `json:"label"`
-	Realm   string `json:"realm"`
-	OK      bool   `json:"ok"`
-	Message string `json:"message"`
+	AuthID string `json:"auth_id"`
+	Label  string `json:"label"`
+	// VendorID 让页面把结果归到正确的供应商分组下。
+	VendorID string `json:"vendor_id,omitempty"`
+	Realm    string `json:"realm"`
+	OK       bool   `json:"ok"`
+	Message  string `json:"message"`
 }
 
 // runForAccounts 对指定账号（或全部账号）并发执行一个动作。
 //
 // 并发度有上限：任务类操作会在上游留下行为记录，全账号瞬间并发容易被风控注意到。
-func runForAccounts(ctx context.Context, callbackID string, targets []string, action func(context.Context, *workbuddy.Credential) (string, error)) []accountActionResult {
+func runForAccounts(ctx context.Context, callbackID string, targets []string, action func(context.Context, core.Vendor, *core.Credential) (string, error)) []accountActionResult {
 	entries, errList := listHostAuths(ctx, callbackID)
 	if errList != nil {
 		return []accountActionResult{{OK: false, Message: "读取账号列表失败：" + errList.Error()}}
@@ -822,7 +863,8 @@ func runForAccounts(ctx context.Context, callbackID string, targets []string, ac
 	cfg := loadedConfig()
 	type job struct {
 		entry      hostAuthEntry
-		credential *workbuddy.Credential
+		vendor     core.Vendor
+		credential *core.Credential
 	}
 	jobs := make([]job, 0, len(entries))
 	for _, entry := range entries {
@@ -838,14 +880,15 @@ func runForAccounts(ctx context.Context, callbackID string, targets []string, ac
 		if !okRaw {
 			continue
 		}
-		credential, errParse := workbuddy.ParseCredential(raw, defaultRealmForParse(cfg))
-		if errParse != nil {
+		// 按归属分发：拿固定解析器解所有凭证会让另一家的凭证被静默跳过。
+		credential, vendor, errResolve := resolveVendorCredential(ctx, callbackID, raw, entry.AuthIndex, nil)
+		if errResolve != nil {
 			continue
 		}
-		if !realmEnabled(cfg, string(credential.Realm())) {
+		if !realmEnabled(cfg, vendor.Region()) {
 			continue
 		}
-		jobs = append(jobs, job{entry: entry, credential: credential})
+		jobs = append(jobs, job{entry: entry, vendor: vendor, credential: credential})
 	}
 
 	results := make([]accountActionResult, len(jobs))
@@ -865,11 +908,12 @@ func runForAccounts(ctx context.Context, callbackID string, targets []string, ac
 			defer func() { <-semaphore }()
 			current := jobs[slot]
 			result := accountActionResult{
-				AuthID: firstNonEmptyString(current.entry.ID, current.entry.Name),
-				Label:  firstNonEmptyString(current.credential.NicknameValue(), current.entry.Label),
-				Realm:  string(current.credential.Realm()),
+				AuthID:   firstNonEmptyString(current.entry.ID, current.entry.Name),
+				Label:    firstNonEmptyString(current.credential.LabelValue(), current.entry.Label),
+				VendorID: current.vendor.ID(),
+				Realm:    current.credential.RegionValue(),
 			}
-			message, errAction := action(ctx, current.credential)
+			message, errAction := action(ctx, current.vendor, current.credential)
 			if errAction != nil {
 				result.OK = false
 				result.Message = errAction.Error()
@@ -969,11 +1013,13 @@ func handleScheduledRun(req pluginapi.ManagementRequest, kind string) any {
 
 // keepaliveResult 是单账号 Token 续期的结果。
 type keepaliveResult struct {
-	AuthID  string `json:"auth_id"`
-	Label   string `json:"label"`
-	Realm   string `json:"realm"`
-	OK      bool   `json:"ok"`
-	Message string `json:"message"`
+	AuthID string `json:"auth_id"`
+	Label  string `json:"label"`
+	// VendorID 让页面把结果归到正确的供应商分组下。
+	VendorID string `json:"vendor_id,omitempty"`
+	Realm    string `json:"realm"`
+	OK       bool   `json:"ok"`
+	Message  string `json:"message"`
 }
 
 // handleKeepaliveRequest 手动执行全账号 Token 续期保活。
@@ -989,10 +1035,10 @@ func handleKeepaliveRequest(req pluginapi.ManagementRequest) pluginapi.Managemen
 		})
 	}
 
-	cfg := loadedConfig()
 	type job struct {
 		entry      hostAuthEntry
-		credential *workbuddy.Credential
+		vendor     core.Vendor
+		credential *core.Credential
 		rawJSON    []byte
 		filePath   string
 	}
@@ -1005,14 +1051,15 @@ func handleKeepaliveRequest(req pluginapi.ManagementRequest) pluginapi.Managemen
 		if !okRaw {
 			continue
 		}
-		credential, errParse := workbuddy.ParseCredential(raw, defaultRealmForParse(cfg))
-		if errParse != nil {
+		// 按归属分发：续期链路各家不同（WorkBuddy 换 token，Qoder jobToken 交换）。
+		credential, vendor, errResolve := resolveVendorCredential(ctx, callbackID, raw, entry.AuthIndex, nil)
+		if errResolve != nil {
 			continue
 		}
 		if filePath != "" {
-			credential.FilePath = filePath
+			credential.SetFilePath(filePath)
 		}
-		jobs = append(jobs, job{entry: entry, credential: credential, rawJSON: raw, filePath: filePath})
+		jobs = append(jobs, job{entry: entry, vendor: vendor, credential: credential, rawJSON: raw, filePath: filePath})
 	}
 
 	if len(jobs) == 0 {
@@ -1028,15 +1075,15 @@ func handleKeepaliveRequest(req pluginapi.ManagementRequest) pluginapi.Managemen
 		firstErrMsg    string
 	)
 	for i, j := range jobs {
-		client := newUpstreamClient(ctx)
-		label := firstNonEmptyString(j.credential.NicknameValue(), j.entry.Label, j.entry.Name)
+		label := firstNonEmptyString(j.credential.LabelValue(), j.entry.Label, j.entry.Name)
 		res := keepaliveResult{
-			AuthID: firstNonEmptyString(j.entry.ID, j.entry.Name),
-			Label:  label,
-			Realm:  string(j.credential.Realm()),
+			AuthID:   firstNonEmptyString(j.entry.ID, j.entry.Name),
+			Label:    label,
+			VendorID: j.vendor.ID(),
+			Realm:    j.credential.RegionValue(),
 		}
 
-		errRefresh := client.RefreshToken(j.credential)
+		updated, refreshed, errRefresh := j.vendor.Refresh(ctx, j.credential)
 		if errRefresh != nil {
 			failedCount++
 			res.OK = false
@@ -1048,27 +1095,14 @@ func handleKeepaliveRequest(req pluginapi.ManagementRequest) pluginapi.Managemen
 		} else {
 			succeededCount++
 			res.OK = true
-			res.Message = "Token 续期成功"
-			// 写回宿主与磁盘
-			if updated, errMerge := workbuddy.MergeStorageJSON(j.rawJSON, j.credential); errMerge == nil {
-				if _, errSave := callHostScoped(callbackID, pluginabi.MethodHostAuthSave, pluginapi.HostAuthSaveRequest{
-					Name: j.entry.Name,
-					JSON: updated,
-				}); errSave != nil {
-					logger.Debug("keepalive %s: host.auth.save failed: %v", label, errSave)
-				}
+			if refreshed {
+				res.Message = "Token 续期成功"
+				saveRefreshedCredential(ctx, callbackID, j.vendor, j.entry, j.rawJSON, updated, j.filePath)
+			} else {
+				// 上游没下发新令牌：不写盘（避免 mtime 无意义变动）。
+				res.Message = "凭证有效（未变更）"
 			}
-			targetPath := j.filePath
-			if targetPath == "" && j.entry.Path != "" {
-				targetPath = j.entry.Path
-			}
-			if targetPath == "" && j.entry.Name != "" {
-				targetPath = filepath.Join("/root/.cli-proxy-api", j.entry.Name)
-			}
-			if errSave := workbuddy.SaveCredentialFile(targetPath, j.credential); errSave != nil {
-				logger.Debug("keepalive %s: save credential file failed: %v", label, errSave)
-			}
-			logger.Info("keepalive %s: token refreshed and saved", label)
+			logger.Info("keepalive %s: refreshed=%t", label, refreshed)
 		}
 		results[i] = res
 	}
@@ -1167,4 +1201,98 @@ func cachedStaticModels() map[string][]pluginapi.ModelInfo {
 		out[vendorID] = copied
 	}
 	return out
+}
+
+// saveRefreshedCredential 把续期后的凭证写回宿主与磁盘。
+//
+// 写两处是刻意的双保险：
+//   - host.auth.save 让宿主热更新内存注册表（否则内存态与磁盘态不一致，
+//     表现为「明明续期了却还报凭证失效」）；
+//   - 直接写文件兜住 host.auth.save 不可用的场景（如宿主未提供该能力）。
+func saveRefreshedCredential(ctx context.Context, callbackID string, vendor core.Vendor,
+	entry hostAuthEntry, original []byte, updated *core.Credential, filePath string) {
+	payload, okPayload := refreshedStorageJSON(vendor, original, updated)
+	if okPayload {
+		if _, errSave := callHostScoped(callbackID, pluginabi.MethodHostAuthSave, pluginapi.HostAuthSaveRequest{
+			Name: entry.Name,
+			JSON: payload,
+		}); errSave != nil {
+			logger.Debug("keepalive %s: host.auth.save failed: %v", entry.Name, errSave)
+		}
+	}
+
+	targetPath := filePath
+	if targetPath == "" {
+		targetPath = entry.Path
+	}
+	if targetPath == "" {
+		return
+	}
+	if errWrite := os.WriteFile(targetPath, payload, 0o600); errWrite != nil {
+		logger.Debug("keepalive %s: write credential file failed: %v", entry.Name, errWrite)
+	}
+}
+
+// refreshedStorageJSON 用供应商自己的合并逻辑更新凭证 JSON。
+//
+// 各家结构不同（WorkBuddy 是嵌套的 auth/account，Qoder 是扁平字段），
+// 通用合并会把顶层字段写乱。这里按供应商类型分派到对应的合并函数。
+func refreshedStorageJSON(vendor core.Vendor, original []byte, updated *core.Credential) ([]byte, bool) {
+	switch vendor.ID() {
+	case workbuddy.VendorIDCN, workbuddy.VendorIDGlobal:
+		native, okNative := updated.Native.(*workbuddy.Credential)
+		if !okNative {
+			return original, false
+		}
+		merged, errMerge := workbuddy.MergeStorageJSON(original, native)
+		if errMerge != nil {
+			return original, false
+		}
+		return merged, true
+	default:
+		// 其它供应商目前没有独立的合并逻辑，保持原文件不变。
+		return original, false
+	}
+}
+
+// normalizeQuotaNumbers 从归一的额度响应里折算「剩余 / 总额」两个数字。
+//
+// 各家的额度口径不同（WorkBuddy 是积分余额，Qoder 是套餐用量桶且分
+// userQuota / addOnQuota 两个桶），因此统一在适配层折算，页面不必理解
+// 任何一家指标键的语义。
+//
+// 折算规则：优先取「剩余」语义的指标与「总额」语义的指标；都取不到时返回 0,0
+// （页面显示 "—"，这是诚实的结果，好过显示一个编出来的数）。
+func normalizeQuotaNumbers(quota *pluginapi.QuotaFetchResponse) (remain, total int64) {
+	if quota == nil {
+		return 0, 0
+	}
+	// 按已知的指标键收集。新增供应商时在这里补它的键即可——
+	// 比让页面按语义猜稳定得多。
+	for _, metric := range quota.Summary {
+		switch metric.Key {
+		case "credit_remain", "user_quota_remaining", "addon_quota_remaining", "remaining":
+			if remain == 0 {
+				remain = int64(metric.Value)
+			}
+		case "credit_total", "user_quota_total", "addon_quota_total", "total":
+			if total == 0 {
+				total = int64(metric.Value)
+			}
+		}
+	}
+	if total == 0 {
+		// 没有「总额」指标时，用剩余 + 已用凑一个总额，让进度条有意义。
+		var used int64
+		for _, metric := range quota.Summary {
+			switch metric.Key {
+			case "credit_used", "user_quota_used", "addon_quota_used", "used":
+				used += int64(metric.Value)
+			}
+		}
+		if used > 0 {
+			total = remain + used
+		}
+	}
+	return remain, total
 }

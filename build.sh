@@ -2,25 +2,20 @@
 # 本地构建：先跑测试，再产出平台对应的动态库。
 #
 # 本机没有 Go 工具链（只有 docker 镜像里有），因此统一经容器构建。
-# 需要的镜像 freetier-build:1.24 由 scripts/godocker.sh 自动构建
-# （golang:1.24-alpine + gcc + musl-dev，cgo 构建 c-shared 需要 C 编译器）。
+# 用 golang:1.24（Debian 版，自带 gcc）。
+#
+# **不要用 alpine 版**：宿主 CPA 镜像是 Debian(glibc)，alpine(musl) 构建出的
+# .so 会以 "libc.musl-aarch64.so.1: cannot open shared object file" 加载失败。
+# glibc 版的动态库依赖 libc.so.6 / ld-linux-*.so，与宿主一致。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IMAGE="freetier-build:1.24"
+IMAGE="golang:1.24"
 
 command -v docker >/dev/null 2>&1 || {
   echo "Docker 是必需的（本机没有 Go 工具链）。" >&2
   exit 1
 }
-
-if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  echo "构建镜像 $IMAGE（只需一次）…" >&2
-  docker build -t "$IMAGE" - <<'EOF' >&2
-FROM golang:1.24-alpine
-RUN apk add --no-cache gcc musl-dev git
-EOF
-fi
 
 # 动态库扩展名按目标平台决定；产物名必须与 pluginID 一致（freetier2api）。
 ext="so"

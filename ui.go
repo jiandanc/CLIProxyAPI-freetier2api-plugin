@@ -505,10 +505,9 @@ progress { width: 160px; height: 8px; }
 
     accounts.forEach(function (account) {
       var row = el("tr");
-      var isGlobal = (account.realm === "global");
       var vendor = vendorLabel(account.vendor_id, account.realm);
       var vendorCell = el("td");
-      vendorCell.appendChild(pill(vendor, isGlobal ? "" : "warn"));
+      vendorCell.appendChild(pill(vendor, ""));
       row.appendChild(vendorCell);
 
       row.appendChild(el("td", account.label || account.auth_id || "-"));
@@ -683,7 +682,7 @@ progress { width: 160px; height: 8px; }
       var vendor = vendorLabel(model.vendor_id, model.realm);
       var vendorCell = el("td");
       // 国内版用 warn 色区分（海外版用默认色），与账号表保持一致的视觉约定。
-      vendorCell.appendChild(pill(vendor, model.realm === "global" ? "" : "warn"));
+      vendorCell.appendChild(pill(vendor, ""));
       row.appendChild(vendorCell);
 
       // 模型 ID 列（裸名，不带供应商前缀）

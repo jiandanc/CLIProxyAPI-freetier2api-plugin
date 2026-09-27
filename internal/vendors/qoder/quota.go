@@ -168,13 +168,18 @@ func BuildQuotaResponse(quota *Quota) pluginapi.QuotaFetchResponse {
 		response.Groups = append(response.Groups, *group)
 	}
 	if quota.UserQuota != nil {
+		// total 必须一并输出：页面的「剩余/总额 + 使用率」要它才能算比例。
+		// 上游对 Free 计划可能给 total=0（额度按剩余量计），此时仍输出 0——
+		// 页面会显示 "—"，比编一个数诚实。
 		response.Summary = append(response.Summary,
 			pluginapi.QuotaMetric{Key: "user_quota_remaining", Label: "套餐剩余额度", Value: quota.UserQuota.Remaining, Unit: "credits"},
+			pluginapi.QuotaMetric{Key: "user_quota_total", Label: "套餐总额度", Value: quota.UserQuota.Total, Unit: "credits"},
 			pluginapi.QuotaMetric{Key: "user_quota_used", Label: "套餐已用额度", Value: quota.UserQuota.Used, Unit: "credits"})
 	}
 	if quota.AddonQuota != nil {
 		response.Summary = append(response.Summary,
 			pluginapi.QuotaMetric{Key: "addon_quota_remaining", Label: "拓展包剩余额度", Value: quota.AddonQuota.Remaining, Unit: "credits"},
+			pluginapi.QuotaMetric{Key: "addon_quota_total", Label: "拓展包总额度", Value: quota.AddonQuota.Total, Unit: "credits"},
 			pluginapi.QuotaMetric{Key: "addon_quota_used", Label: "拓展包已用额度", Value: quota.AddonQuota.Used, Unit: "credits"})
 	}
 	if quota.IsQuotaExceeded {

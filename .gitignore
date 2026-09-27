@@ -3,6 +3,9 @@ dist/
 *.so
 *.dylib
 *.dll
+# 容器里跑 `go build` 时，未指定 -o 的产物会落到工作目录，名为 module 名。
+# 它没有扩展名，因此上面的规则拦不住。
+/freetier2api-plugin
 # c-shared 构建会在 dist/ 旁边生成同名头文件；但 bridge.h 是**手写的源码**，
 # 是构建必需文件（见下面的反向规则）。
 *.h

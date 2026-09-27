@@ -28,22 +28,24 @@ func runCheckinAll(ctx context.Context) {
 	logger.Info("checkin: starting for all accounts")
 	count := 0
 	forEachAccount(ctx, "", func(ctx context.Context, account *accountContext) error {
-		if account.isGlobal() {
-			// 国际版没有每日签到活动（实测签到端点 404）。
+		// 由供应商自己决定是否提供签到：WorkBuddy 国际版与 Qoder 国际版
+		// 都实测没有签到活动（签到端点 404），这里不硬编码区域判断。
+		if !account.vendor.SupportsCheckin() {
 			return nil
 		}
-		client := newUpstreamClient(ctx)
-		result, errCheckin := client.DailyCheckin(accountNative(account))
+		result, errCheckin := account.vendor.Checkin(ctx, account.credential)
 		if errCheckin != nil {
 			logger.Error("checkin %s: %v", account.label(), errCheckin)
 			return nil
 		}
-		recordCheckinResult(accountNative(account), result)
+		if result == nil {
+			return nil
+		}
+		recordCheckinResult(account.credential, result)
 		if result.Already {
 			logger.Info("checkin %s: already checked in today", account.label())
 		} else {
-			logger.Info("checkin %s: +%d credit +%d energy (streak %d)",
-				account.label(), result.Credit, result.Energy, result.Streak)
+			logger.Info("checkin %s: %s", account.label(), result.Message)
 		}
 		count++
 		return nil
