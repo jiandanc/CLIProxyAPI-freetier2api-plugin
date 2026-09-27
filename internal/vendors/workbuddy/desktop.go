@@ -111,7 +111,7 @@ func (c *Client) applyDesktopChatHeaders(req *http.Request, cred *Credential, ex
 	req.Header.Set("X-Agent-Type", "main")
 	req.Header.Set("X-IDE-Name", "WorkBuddy")
 	req.Header.Set("X-IDE-Type", "WorkBuddy")
-	req.Header.Set("X-IDE-Version", desktopClientVersion)
+	req.Header.Set("X-IDE-Version", DesktopClientVersion)
 	if strings.TrimSpace(expertID) != "" {
 		req.Header.Set("X-Expert-Id", strings.TrimSpace(expertID))
 	}

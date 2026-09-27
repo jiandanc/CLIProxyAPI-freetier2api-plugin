@@ -413,6 +413,34 @@ func parseClock(raw string) (hour, minute int, err error) {
 	return hour, minute, nil
 }
 
+// applyPromptConfig 应用提示词配置到供应商包。
+//
+// 提示词体系是 WorkBuddy 特有的（它的上游按逐字匹配做内容审核），
+// 因此状态存在供应商包里，根层只负责解析配置并推送。
+//
+// 读不到自定义提示词文件时**不静默降级**：运维会以为提示词生效了，
+// 实际还在用内置的，这种静默失败比直接报错更难排查。
+func applyPromptConfig(cfg pluginConfig) {
+	text := workbuddy.BuiltinPrompt()
+	if path := strings.TrimSpace(cfg.PromptFile); path != "" {
+		loaded, errLoad := loadPromptFromFile(path)
+		if errLoad != nil {
+			logger.Error("load prompt file failed, falling back to built-in prompt: %v", errLoad)
+		} else if loaded != "" {
+			text = loaded
+		}
+	}
+	mode := strings.TrimSpace(cfg.PromptMode)
+	// 页面设置覆盖 YAML 配置：用户在控制台页改过的模式以页面为准。
+	if state := snapshotState(); state.PromptMode != nil && strings.TrimSpace(*state.PromptMode) != "" {
+		mode = strings.TrimSpace(*state.PromptMode)
+	}
+	workbuddy.SetPrompt(mode, text)
+}
+
+// promptModeFor 返回当前生效的提示词模式（供管理端展示）。
+func promptModeFor() string { return workbuddy.PromptMode() }
+
 // applyConfig 应用配置：更新全局配置、初始化日志与状态目录、设置指纹盐。
 //
 // register 与 reconfigure 共用这一个入口，所有副作用都收敛在这里。

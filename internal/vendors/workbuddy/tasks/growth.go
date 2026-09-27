@@ -5,31 +5,16 @@ package tasks
 // 共同特征：都挂在「签到之后」或独立整点执行，且全部按天幂等。
 
 import (
+	"freetier2api-plugin/internal/vendors/workbuddy"
 	"context"
 	"fmt"
 	"strings"
 	"time"
-
-	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
-// Streak 是连登状态。
-type Streak struct {
-	// Days 是连续登录天数。
-	Days int64
-	// MakeupCards 是补签卡余额。
-	MakeupCards int64
-	// Tiers 是各档位的兑换状态。
-	Tiers []StreakTier
-}
-
-// StreakTier 是一个兑换档位。
-type StreakTier struct {
-	// Tier 是档位标识（7d / 14d / 28d）。
-	Tier string
-	// Status 是兑换状态：locked / claimed / 空（可兑换）。
-	Status string
-}
+// 连登状态类型（Streak / StreakTier）定义在 activity.go —— 它们是上游接口的
+// 返回结构，属于协议层；本文件只消费它们。合并前两处各有一份同名同形的定义，
+// 是跨包重复，已去重。
 
 // RunStreakBonus 执行单账号的连登闭环。
 //
@@ -359,19 +344,4 @@ func withFingerprint(credential *workbuddy.Credential, events []map[string]any) 
 		out = append(out, mergeEvent(base, event))
 	}
 	return out
-}
-
-// sleepCtx 可取消的睡眠。返回 false 表示上下文已取消。
-func sleepCtx(ctx context.Context, d time.Duration) bool {
-	if d <= 0 {
-		return ctx.Err() == nil
-	}
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
 }

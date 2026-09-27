@@ -319,14 +319,17 @@ func decodeRequest(raw []byte, target any) error {
 //
 // 每个请求新建：客户端本身很轻（只是配置快照），而它需要绑定请求级
 // callbackID 才能让出站请求进宿主的请求日志。
+//
+// 提示词状态由 workbuddy 包自己持有（SetPrompt 推入），这里只取用，
+// 不再从 cfg 里读——页面设置覆盖 YAML 的逻辑收敛在 applyPromptConfig。
 func newUpstreamClient(ctx context.Context) *workbuddy.Client {
 	cfg := loadedConfig()
 	return workbuddy.NewClient(workbuddy.Options{
 		Context:              ctx,
 		EnabledRealms:        cfg.EnabledRealms,
-		PromptMode:           promptModeFor(),
-		PromptText:           promptTextFor(cfg),
-		OnContentBlocked:     markPromptDegraded,
+		PromptMode:           workbuddy.PromptMode(),
+		PromptText:           workbuddy.PromptText(),
+		OnContentBlocked:     workbuddy.MarkPromptDegraded,
 		SanitizeFingerprints: cfg.SanitizeFingerprints,
 		PassthroughIP:        cfg.PassthroughIP,
 		UserAgent:            cfg.UserAgent,

@@ -6,10 +6,9 @@ package tasks
 // （上报仍返回 200），因此值得用测试把关键字段锁住。
 
 import (
+	"freetier2api-plugin/internal/vendors/workbuddy"
 	"testing"
 	"time"
-
-	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // testCredential 构造一个测试凭证。

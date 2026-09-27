@@ -264,7 +264,7 @@ func (c *Client) applyDesktopHeaders(req *http.Request, cred *Credential) {
 
 // desktopUA 返回桌面指纹族的 UA。
 func desktopUA() string {
-	return "WorkBuddy/" + desktopClientVersion + " WorkBuddy/" + desktopClientVersion + " CLI/" + defaultCLIVersion
+	return "WorkBuddy/" + DesktopClientVersion + " WorkBuddy/" + DesktopClientVersion + " CLI/" + defaultCLIVersion
 }
 
 // requestIDFor 生成一个带纳秒后缀的请求 ID（桌面族要求每次不同）。

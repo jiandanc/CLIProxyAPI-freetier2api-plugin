@@ -181,8 +181,9 @@ const (
 	defaultClientVersion = "5.5.4"
 	defaultCLIVersion    = "2.137.1"
 	defaultClientName    = "WorkBuddy"
-	// desktopClientVersion 是桌面指纹族使用的版本（与 CLI 族刻意不同）。
-	desktopClientVersion = "5.5.6"
+	// DesktopClientVersion 是桌面指纹族使用的版本（与 CLI 族刻意不同）。
+	// 导出供 tasks 子包构造桌面指纹事件使用。
+	DesktopClientVersion = "5.5.6"
 	// codeBuddyIDEUA / codeBuddyCLIUA 是模型目录探测专用 UA。
 	//
 	// /v3/config 对 UA 敏感：过旧会拿到精简目录或 400 code=12403。

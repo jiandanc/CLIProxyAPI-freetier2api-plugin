@@ -1,4 +1,4 @@
-// Package tasks 实现 CodeBuddy 的成长任务与活动体系。
+// 本文件实现 CodeBuddy 的成长任务事件链与客户端指纹派生。
 //
 // 本包是纯逻辑层，依赖 cb 包完成出站（经宿主 HTTP 桥）。
 //
@@ -17,10 +17,9 @@
 package tasks
 
 import (
+	"freetier2api-plugin/internal/vendors/workbuddy"
 	"context"
 	"time"
-
-	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // 节流参数。全部照抄原项目实测值——这些数字是风控边界，
@@ -86,11 +85,11 @@ func desktopFingerprint(credential *workbuddy.Credential) map[string]any {
 		"commit":      "5f9692923c93033111c51ad7b003eb80204a9b75",
 		"ideName":     "WorkBuddy",
 		"ideType":     "WorkBuddy",
-		"ideVersion":  desktopClientVersion,
+		"ideVersion":  workbuddy.DesktopClientVersion,
 		"machineId":   fingerprint(credential, "machine"),
 		"sessionId":   fingerprint(credential, "session"),
 		"extName":     "workbuddy-desktop",
-		"extVersion":  desktopClientVersion,
+		"extVersion":  workbuddy.DesktopClientVersion,
 		"os":          "win32",
 		"arch":        "x64",
 		"osVersion":   "10.0.26220",
@@ -100,9 +99,6 @@ func desktopFingerprint(credential *workbuddy.Credential) map[string]any {
 		"presentAt":   now,
 	}
 }
-
-// desktopClientVersion 是桌面指纹族的版本号（与 CLI 族刻意不同）。
-const desktopClientVersion = "5.5.6"
 
 // mergeEvent 把业务字段合并进指纹基底（业务字段优先）。
 func mergeEvent(base map[string]any, event map[string]any) map[string]any {
