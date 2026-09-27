@@ -2,14 +2,14 @@
   "schema_version": 1,
   "plugins": [
     {
-      "id": "workbuddy2api",
-      "name": "WorkBuddy 2API",
-      "description": "把腾讯 CodeBuddy（WorkBuddy）账号接入 CLIProxyAPI：auth / model / executor / quota / management 五类能力，支持国内版与国际版双域隔离、模型清单动态探测、额度查询、每日签到、连登兑换与抽奖、猫猫旅行、夜猫子、成长任务一键完成与开学季活动。",
-      "author": "workbuddy2api",
-      "repository": "https://github.com/jiandanc/CLIProxyAPI-workbuddy2api-plugin",
-      "homepage": "https://github.com/jiandanc/CLIProxyAPI-workbuddy2api-plugin",
-      "license": "MIT",
-      "tags": ["Provider", "CodeBuddy", "WorkBuddy", "Auth", "Quota", "Management", "Tasks"]
+      "id": "freetier2api",
+      "name": "FreeTier 2API",
+      "description": "把多个免费额度供应商（WorkBuddy 国内版 / WorkBuddy 国际版 / Qoder 国内版 / Qoder 国际版）接入 CLIProxyAPI：auth / model / executor / quota / management 五类能力，按供应商插桩，支持凭证归属隔离、模型清单动态探测、额度查询、每日签到、成长任务闭环与提示词防御。",
+      "author": "jiandanc",
+      "repository": "https://github.com/jiandanc/CLIProxyAPI-freetier2api-plugin",
+      "homepage": "https://github.com/jiandanc/CLIProxyAPI-freetier2api-plugin",
+      "license": "GPL-3.0",
+      "tags": ["Provider", "WorkBuddy", "CodeBuddy", "Qoder", "Auth", "Quota", "Management", "Tasks"]
     }
   ]
 }

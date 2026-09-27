@@ -17,7 +17,7 @@
 //	sse.go        流式透传与聚合
 //	catalog.go    模型目录探测
 //	efforts.go    reasoning effort 档位表
-package cb
+package workbuddy
 
 import "strings"
 
@@ -47,6 +47,34 @@ func (r Region) IsGlobal() bool { return r == RegionGlobal }
 
 // String 实现 fmt.Stringer。
 func (r Region) String() string { return string(r) }
+
+// 供应商实例标识。同时是凭证文件名前缀（workbuddycn-<uid>.json）。
+//
+// CN 与 GLOBAL 在本插件里是两个独立供应商：域名、模型清单、reasoning 档位表、
+// 签到活动都不同，且凭证不通用。因此各自有独立的 ID 与文件名前缀，
+// 让账号、模型、认证文件都能按供应商区分开。
+const (
+	// VendorIDCN 是国内版供应商标识。
+	VendorIDCN = "workbuddycn"
+	// VendorIDGlobal 是国际版供应商标识。
+	VendorIDGlobal = "workbuddyglobal"
+)
+
+// VendorIDFor 返回该区域对应的供应商标识。
+func VendorIDFor(region Region) string {
+	if region.IsGlobal() {
+		return VendorIDGlobal
+	}
+	return VendorIDCN
+}
+
+// VendorNameFor 返回该区域的展示名（供管理端与页面使用）。
+func VendorNameFor(region Region) string {
+	if region.IsGlobal() {
+		return "WorkBuddy 国际版"
+	}
+	return "WorkBuddy 国内版"
+}
 
 // Endpoints 是某个域的全部上游端点。
 //

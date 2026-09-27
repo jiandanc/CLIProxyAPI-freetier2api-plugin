@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strings"
 
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // 模型 ID 形如 "cn:glm-5.2" / "global:gpt-5.5"。
@@ -31,23 +31,23 @@ func SplitModelID(modelID string) (realm, bareModel string) {
 	}
 	prefix := trimmed[:index]
 	switch prefix {
-	case string(cb.RegionCN):
-		return string(cb.RegionCN), trimmed[index+1:]
-	case string(cb.RegionGlobal):
-		return string(cb.RegionGlobal), trimmed[index+1:]
+	case string(workbuddy.RegionCN):
+		return string(workbuddy.RegionCN), trimmed[index+1:]
+	case string(workbuddy.RegionGlobal):
+		return string(workbuddy.RegionGlobal), trimmed[index+1:]
 	}
 	return "", trimmed
 }
 
 // PrefixModelID 给裸模型名加上 realm 前缀。
-func PrefixModelID(region cb.Region, bareModel string) string {
+func PrefixModelID(region workbuddy.Region, bareModel string) string {
 	return string(region) + realmSeparator + strings.TrimSpace(bareModel)
 }
 
 // ModelInfoToPluginAPI 把内部模型元数据转成宿主契约类型。
 //
 // functionCalling 与 reasoning 的档位会一并透出，客户端据此渲染能力提示。
-func ModelInfoToPluginAPI(region cb.Region, model cb.ModelInfo) pluginapi.ModelInfo {
+func ModelInfoToPluginAPI(region workbuddy.Region, model workbuddy.ModelInfo) pluginapi.ModelInfo {
 	id := strings.TrimSpace(model.ID)
 	name := strings.TrimSpace(model.Name)
 	if name == "" {
@@ -87,7 +87,7 @@ func ModelInfoToPluginAPI(region cb.Region, model cb.ModelInfo) pluginapi.ModelI
 // describeModel 拼接模型说明（带积分倍率前缀）。
 //
 // 倍率是用户最关心的成本信息，放在说明最前面。
-func describeModel(region cb.Region, model cb.ModelInfo) string {
+func describeModel(region workbuddy.Region, model workbuddy.ModelInfo) string {
 	description := strings.TrimSpace(model.Description)
 	credits := strings.TrimSpace(model.Credits)
 	if credits == "" {
@@ -108,7 +108,7 @@ func errorToPluginError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var upstreamErr *cb.Error
+	var upstreamErr *workbuddy.Error
 	if !asUpstreamError(err, &upstreamErr) {
 		// 非上游分类错误（本地问题）：按 502 报告，让宿主换号重试。
 		return retryablePluginError("workbuddy_request_failed", err.Error(), 502)
@@ -122,11 +122,11 @@ func errorToPluginError(err error) error {
 }
 
 // asUpstreamError 判断错误是否为上游分类错误。
-func asUpstreamError(err error, target **cb.Error) bool {
+func asUpstreamError(err error, target **workbuddy.Error) bool {
 	if err == nil {
 		return false
 	}
-	var upstreamErr *cb.Error
+	var upstreamErr *workbuddy.Error
 	if errors.As(err, &upstreamErr) {
 		*target = upstreamErr
 		return true
@@ -138,17 +138,17 @@ func asUpstreamError(err error, target **cb.Error) bool {
 //
 // 模型带前缀时以前缀为准；不带前缀时由凭证决定——
 // 这样用户手打裸模型名也能工作，代价是「裸名 + 双域账号」时域不可预测。
-func RealmForRequest(modelID string, cred *cb.Credential) (cb.Region, string) {
+func RealmForRequest(modelID string, cred *workbuddy.Credential) (workbuddy.Region, string) {
 	realm, bare := SplitModelID(modelID)
 	if realm != "" {
-		return cb.NormalizeRegion(realm), bare
+		return workbuddy.NormalizeRegion(realm), bare
 	}
 	if cred != nil {
 		return cred.Realm(), bare
 	}
-	return cb.RegionCN, bare
+	return workbuddy.RegionCN, bare
 }
 
 // cbProviderKey 是 cb 包里的 provider 键（凭证归属判定与请求头归属都用它）。
 // 定义在这里是为了让编译期断言能校验两处一致——不一致会让凭证归属判定失效。
-const cbProviderKey = cb.ProviderKey
+const cbProviderKey = workbuddy.ProviderKey

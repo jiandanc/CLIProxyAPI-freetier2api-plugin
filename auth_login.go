@@ -24,10 +24,10 @@ import (
 	"sync"
 	"time"
 
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/httpx"
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/httpx"
+	"freetier2api-plugin/internal/logger"
 )
 
 const (
@@ -57,7 +57,7 @@ type loginPollRPCRequest struct {
 
 // pendingLogin 是一次进行中的登录会话。
 type pendingLogin struct {
-	region    cb.Region
+	region    workbuddy.Region
 	state     string
 	createdAt time.Time
 	// lastPoll 记录上次向上游轮询的时刻（节流）。
@@ -166,7 +166,7 @@ func handleAuthLoginPoll(request []byte) ([]byte, error) {
 		logger.Error("fetch account info failed after token exchange: %v", errAccount)
 	}
 
-	credential := &cb.Credential{
+	credential := &workbuddy.Credential{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		UID:          account.uid,
@@ -212,17 +212,17 @@ func handleAuthLoginPoll(request []byte) ([]byte, error) {
 }
 
 // loginRegion 从 Metadata 解析目标域。
-func loginRegion(metadata map[string]any) cb.Region {
+func loginRegion(metadata map[string]any) workbuddy.Region {
 	if metadata != nil {
 		if raw, okRaw := metadata["realm"].(string); okRaw && strings.TrimSpace(raw) != "" {
-			return cb.NormalizeRegion(raw)
+			return workbuddy.NormalizeRegion(raw)
 		}
 	}
 	cfg := loadedConfig()
-	if realmEnabled(cfg, string(cb.RegionCN)) {
-		return cb.RegionCN
+	if realmEnabled(cfg, string(workbuddy.RegionCN)) {
+		return workbuddy.RegionCN
 	}
-	return cb.RegionGlobal
+	return workbuddy.RegionGlobal
 }
 
 // loginAccount 是登录流程取到的账号信息。
@@ -234,8 +234,8 @@ type loginAccount struct {
 }
 
 // requestLoginState 取 state 并构造用户授权链接。
-func requestLoginState(ctx context.Context, region cb.Region) (state, authURL string, err error) {
-	endpoints := cb.GetEndpoints(region)
+func requestLoginState(ctx context.Context, region workbuddy.Region) (state, authURL string, err error) {
+	endpoints := workbuddy.GetEndpoints(region)
 	url := endpoints.ChatBase + "/v2/plugin/auth/state?platform=" + loginUAPlatform
 	// 上游要求 POST 带 JSON body（空对象即可）；不带 body 时部分节点返回异常。
 	req, errReq := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader("{}"))
@@ -267,8 +267,8 @@ func requestLoginState(ctx context.Context, region cb.Region) (state, authURL st
 }
 
 // exchangeLoginToken 用 state 换 token。
-func exchangeLoginToken(ctx context.Context, region cb.Region, state string) (accessToken, refreshToken string, err error) {
-	endpoints := cb.GetEndpoints(region)
+func exchangeLoginToken(ctx context.Context, region workbuddy.Region, state string) (accessToken, refreshToken string, err error) {
+	endpoints := workbuddy.GetEndpoints(region)
 	url := endpoints.ChatBase + "/v2/plugin/auth/token?state=" + url.QueryEscape(state)
 	req, errReq := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if errReq != nil {
@@ -294,8 +294,8 @@ func exchangeLoginToken(ctx context.Context, region cb.Region, state string) (ac
 }
 
 // fetchLoginAccount 取账号信息。
-func fetchLoginAccount(ctx context.Context, region cb.Region, state, accessToken string) (loginAccount, error) {
-	endpoints := cb.GetEndpoints(region)
+func fetchLoginAccount(ctx context.Context, region workbuddy.Region, state, accessToken string) (loginAccount, error) {
+	endpoints := workbuddy.GetEndpoints(region)
 	url := endpoints.ChatBase + "/v2/plugin/login/account?state=" + url.QueryEscape(state)
 	req, errReq := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if errReq != nil {
@@ -342,7 +342,7 @@ func doLoginRequest(req *http.Request) (json.RawMessage, error) {
 		return nil, fmt.Errorf("read login response: %w", errRead)
 	}
 	if resp.StatusCode >= 400 {
-		return nil, cb.Classify(resp.StatusCode, string(body))
+		return nil, workbuddy.Classify(resp.StatusCode, string(body))
 	}
 	var envelope struct {
 		Code int             `json:"code"`
@@ -357,8 +357,8 @@ func doLoginRequest(req *http.Request) (json.RawMessage, error) {
 		// 关键：**不能**把所有非 0 业务码都当成失败。
 		// 上游用 11217 + "login ing..." 表示「授权尚未完成」，这是轮询期间的
 		// 正常状态；当成失败会让用户看到"授权失败"而实际上只差一步。
-		return nil, &cb.Error{
-			Kind:   cb.KindClient,
+		return nil, &workbuddy.Error{
+			Kind:   workbuddy.KindClient,
 			Status: resp.StatusCode,
 			Msg:    fmt.Sprintf("%s %s", strconv.Itoa(envelope.Code), strings.TrimSpace(envelope.Msg)),
 		}
@@ -374,8 +374,8 @@ func doLoginRequest(req *http.Request) (json.RawMessage, error) {
 //
 // X-Requested-With 与 Accept 的形态要和官方客户端一致：上游对设备授权
 // 端点做 UA/头校验，缺 X-Requested-With 时行为不确定。
-func applyLoginHeaders(req *http.Request, region cb.Region) {
-	endpoints := cb.GetEndpoints(region)
+func applyLoginHeaders(req *http.Request, region workbuddy.Region) {
+	endpoints := workbuddy.GetEndpoints(region)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/plain, */*")
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
@@ -392,7 +392,7 @@ func isLoginPending(err error) bool {
 	if err == nil {
 		return false
 	}
-	var upstreamErr *cb.Error
+	var upstreamErr *workbuddy.Error
 	if !errors.As(err, &upstreamErr) {
 		return false
 	}
@@ -420,7 +420,7 @@ const loginPendingCode = "11217"
 //
 // 文件名以 workbuddy 开头是必要的：auth.parse 的文件名启发式与
 // 后续的凭证归属判定都依赖它。
-func loginFileName(credential *cb.Credential) string {
+func loginFileName(credential *workbuddy.Credential) string {
 	uid := strings.TrimSpace(credential.UID)
 	if uid == "" {
 		uid = newLoginSessionID()
@@ -453,7 +453,7 @@ func sanitizeFileComponent(raw string) string {
 }
 
 // defaultDomainFor 返回某域的默认域名。
-func defaultDomainFor(region cb.Region) string {
+func defaultDomainFor(region workbuddy.Region) string {
 	if region.IsGlobal() {
 		return "www.workbuddy.ai"
 	}
@@ -462,7 +462,7 @@ func defaultDomainFor(region cb.Region) string {
 
 // newLoginSessionID 生成一个随机的登录会话标识。
 func newLoginSessionID() string {
-	return cb.NewHexID()
+	return workbuddy.NewHexID()
 }
 
 // gcLoginSessionsLocked 清理过期的登录会话。调用方必须持有 loginStoreMu。

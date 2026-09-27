@@ -1,3 +1,3 @@
-module workbuddy2api-plugin
+module freetier2api-plugin
 
 go 1.22

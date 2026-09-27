@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/logger"
 )
 
 // 默认排程（本地时区整点）。
@@ -315,7 +315,7 @@ const accountGap = 800 * time.Millisecond
 // accountContext 是遍历中单个账号的上下文。
 type accountContext struct {
 	entry      hostAuthEntry
-	credential *cb.Credential
+	credential *workbuddy.Credential
 	callbackID string
 }
 

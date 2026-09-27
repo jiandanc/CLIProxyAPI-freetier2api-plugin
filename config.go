@@ -2,7 +2,7 @@ package main
 
 // 本文件负责插件配置：结构体定义、宿主注入 YAML 的解析、校验与生效。
 //
-// 宿主在 plugin.register / plugin.reconfigure 时把 plugins.configs.workbuddy2api
+// 宿主在 plugin.register / plugin.reconfigure 时把 plugins.configs.freetier2api
 // 下的配置渲染成一段 YAML 传进来（会额外追加 enabled / priority 两键）。
 // 本插件只解析自己声明的字段，未知字段忽略——这样宿主新增字段不会让插件失效。
 //
@@ -17,11 +17,11 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/logger"
 )
 
-// pluginConfig 是 plugins.configs.workbuddy2api 解析出的有效配置。
+// pluginConfig 是 plugins.configs.freetier2api 解析出的有效配置。
 type pluginConfig struct {
 	// EnabledRealms 是启用的域：逗号分隔的 cn / global 子集。
 	// 只留 cn 时插件只注册 cn:* 模型，global 账号不会被路由到。
@@ -74,8 +74,8 @@ const (
 	defaultLogLevel      = "info"
 	defaultPromptMode    = "passthrough"
 	defaultCheckinAt     = "10:00"
-	defaultStateDirName  = ".workbuddy2api-plugin"
-	stateDirEnvOverride  = "WORKBUDDY2API_PLUGIN_HOME"
+	defaultStateDirName  = ".freetier2api-plugin"
+	stateDirEnvOverride  = "FREETIER2API_PLUGIN_HOME"
 	stateFileName        = "state.json"
 	saltFileName         = "machine_salt"
 	configKeyEnabled     = "enabled"
@@ -106,9 +106,9 @@ func defaultPluginConfig() pluginConfig {
 		LogLevel:             defaultLogLevel,
 		PromptMode:           defaultPromptMode,
 		SanitizeFingerprints: true,
-		ClientVersion:        cb.DefaultClientVersion,
-		CLIVersion:           cb.DefaultCLIVersion,
-		ClientName:           cb.DefaultClientName,
+		ClientVersion:        workbuddy.DefaultClientVersion,
+		CLIVersion:           workbuddy.DefaultCLIVersion,
+		ClientName:           workbuddy.DefaultClientName,
 		// 默认开启：装了插件就希望它自己把签到与任务跑起来，
 		// 让用户先去配置里找开关再打开是多余的。
 		AutoCheckin:   true,

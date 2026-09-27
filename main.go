@@ -1,10 +1,15 @@
 package main
 
-// workbuddy2api —— 把腾讯 CodeBuddy（WorkBuddy）账号接入 CLIProxyAPI 的原生动态库插件。
+// freetier2api —— 把多个免费额度供应商接入 CLIProxyAPI 的原生动态库插件。
 //
 // 插件通过宿主的 cliproxy_plugin_init ABI 加载，一次性声明五类能力：
 // auth provider、model provider、executor、quota provider、management API。
-// 宿主的路由、鉴权、调度、日志与代理全部复用，插件只负责「CodeBuddy 协议」与「任务自动化」。
+// 宿主的路由、鉴权、调度、日志与代理全部复用。
+//
+// 供应商插桩：宿主 ABI 限制一个插件进程只能声明一个 provider key
+// （auth.identifier 返回单个字符串，注册期调一次永久缓存，且与 auth 文件的
+// type 字段严格相等才认领）。因此本插件用统一 providerKey="freetier"，
+// 供应商靠凭证文件名前缀与文件内的 vendor 字段区分，各自实现 core.Vendor。
 //
 // 分层纪律：
 //   - 本文件与同目录的能力文件属于 ABI 适配层，可以依赖 cpasdk；
@@ -16,11 +21,11 @@ import (
 	"fmt"
 	"strings"
 
-	"workbuddy2api-plugin/cpasdk/pluginabi"
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/httpx"
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/cpasdk/pluginabi"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/httpx"
+	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // pluginVersion 是插件版本，会在注册/状态接口里回给宿主。
@@ -30,7 +35,7 @@ import (
 var pluginVersion = defaultPluginVersion
 
 // defaultPluginVersion 是未注入时的版本号。
-const defaultPluginVersion = "0.0.3"
+const defaultPluginVersion = "0.1.0"
 
 // effectivePluginVersion 返回对外上报的版本号。
 //
@@ -44,19 +49,23 @@ func effectivePluginVersion() string {
 }
 
 const (
-	// pluginID 必须与动态库文件名一致（workbuddy2api.so → plugins.configs.workbuddy2api）。
-	pluginID = "workbuddy2api"
+	// pluginID 必须与动态库文件名一致（freetier2api.so → plugins.configs.freetier2api）。
+	pluginID = "freetier2api"
 	// pluginDisplayName 是管理端展示名。
-	pluginDisplayName = "WorkBuddy 2API"
-	pluginAuthor      = "workbuddy2api"
-	pluginRepository  = "https://github.com/jiandanc/CLIProxyAPI-workbuddy2api-plugin"
+	pluginDisplayName = "FreeTier 2API"
+	pluginAuthor      = "jiandanc"
+	pluginRepository  = "https://github.com/jiandanc/CLIProxyAPI-freetier2api-plugin"
 
 	// providerKey 是本插件在 CPA 里占用的 provider 键。
 	//
 	// 它同时是四处的取值：模型注册 provider、执行器 identifier、
 	// auth provider identifier、quota provider identifier。
-	// CPA 会跳过与原生 provider 重名的插件 provider，workbuddy 不与任何原生 provider 冲突。
-	providerKey = "workbuddy"
+	//
+	// **所有供应商共用这一个键**：宿主的 auth.identifier 只返回单个字符串、
+	// 注册期调一次永久缓存，且与 auth 文件的 type 字段严格相等才认领该文件
+	// （internal/pluginhost/auth_provider.go:130-147）。因此供应商的区分落在
+	// 凭证文件名前缀与文件内的 vendor 字段上，而不是 provider key。
+	providerKey = "freetier"
 
 	managementRoutePrefix = "/plugins/" + pluginID
 	jsonContentType       = "application/json; charset=utf-8"
@@ -64,9 +73,9 @@ const (
 
 	// formatChatCompletions 是本插件唯一声明支持的协议格式。
 	//
-	// 原项目入站只有 /v1/chat/completions（OpenAI 兼容），上游也是 OpenAI 形态 SSE。
-	// 只声明一种格式意味着：Claude / Codex / Gemini 客户端由宿主翻译成 chat-completions
-	// 再交给插件，插件不必维护三套报文拼装与流式分帧逻辑。
+	// 所有供应商统一只处理 chat-completions：Claude / Codex / Gemini 客户端
+	// 由宿主翻译成 chat-completions 再交给插件。插件不重复做协议转换，
+	// 避免与宿主的能力重复且在两侧产生不一致的分帧行为。
 	formatChatCompletions = "chat-completions"
 )
 
@@ -251,7 +260,7 @@ func pluginRegistration() registration {
 				{Name: "extra_models", Type: pluginapi.ConfigFieldTypeString,
 					Description: "额外注册的模型名（不含 cn: / global: 前缀），逗号分隔。"},
 				{Name: "state_dir", Type: pluginapi.ConfigFieldTypeString,
-					Description: "插件状态目录（机器盐、模型缓存、任务记录、日志），默认 ~/.workbuddy2api-plugin。"},
+					Description: "插件状态目录（机器盐、模型缓存、任务记录、日志），默认 ~/.freetier2api-plugin。"},
 				{Name: "log_level", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"debug", "info", "error"},
 					Description: "插件日志级别，默认 info。"},
 				{Name: "log_to_file", Type: pluginapi.ConfigFieldTypeBoolean,
@@ -310,9 +319,9 @@ func decodeRequest(raw []byte, target any) error {
 //
 // 每个请求新建：客户端本身很轻（只是配置快照），而它需要绑定请求级
 // callbackID 才能让出站请求进宿主的请求日志。
-func newUpstreamClient(ctx context.Context) *cb.Client {
+func newUpstreamClient(ctx context.Context) *workbuddy.Client {
 	cfg := loadedConfig()
-	return cb.NewClient(cb.Options{
+	return workbuddy.NewClient(workbuddy.Options{
 		Context:              ctx,
 		EnabledRealms:        cfg.EnabledRealms,
 		PromptMode:           promptModeFor(),

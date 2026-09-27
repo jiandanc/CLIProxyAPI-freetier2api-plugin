@@ -3,8 +3,8 @@ package main
 // 本文件实现 management 能力：插件自有管理接口与内嵌控制台页。
 //
 // 安全边界（重要）：
-//   - /v0/resource/plugins/workbuddy2api/console 只返回**静态页面**，不含任何账号/凭证数据；
-//   - 所有读取与动作都走 /v0/management/plugins/workbuddy2api/...，由 CPA 的管理鉴权保护；
+//   - /v0/resource/plugins/freetier2api/console 只返回**静态页面**，不含任何账号/凭证数据；
+//   - 所有读取与动作都走 /v0/management/plugins/freetier2api/...，由 CPA 的管理鉴权保护；
 //   - 接口返回里**永远不含 token**（只回传账号名、域、状态、额度与任务结果）。
 
 import (
@@ -19,11 +19,11 @@ import (
 	"strings"
 	"time"
 
-	"workbuddy2api-plugin/cpasdk/pluginabi"
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/httpx"
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/cpasdk/pluginabi"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/httpx"
+	"freetier2api-plugin/internal/logger"
 )
 
 const (
@@ -156,7 +156,7 @@ func handleManagement(request []byte) ([]byte, error) {
 
 // matchesManagementPath 判断路径是否命中某个管理子路径。
 //
-// 容忍宿主传全路径（/v0/management/plugins/workbuddy2api/x）或子路径（/plugins/workbuddy2api/x）。
+// 容忍宿主传全路径（/v0/management/plugins/freetier2api/x）或子路径（/plugins/freetier2api/x）。
 func matchesManagementPath(path, suffix string) bool {
 	normalized := normalizeRequestPath(path)
 	if !strings.HasPrefix(suffix, "/") {
@@ -276,10 +276,10 @@ type consoleModel struct {
 // nolint: revive // req 保留是为了与其它管理处理器签名一致。
 func handleModelsList(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
 	cfg := loadedConfig()
-	cached := cb.CachedModels()
+	cached := workbuddy.CachedModels()
 
 	models := make([]consoleModel, 0, 64)
-	for _, region := range []cb.Region{cb.RegionCN, cb.RegionGlobal} {
+	for _, region := range []workbuddy.Region{workbuddy.RegionCN, workbuddy.RegionGlobal} {
 		if !realmEnabled(cfg, string(region)) {
 			continue
 		}
@@ -304,7 +304,7 @@ func handleModelsList(req pluginapi.ManagementRequest) pluginapi.ManagementRespo
 	// 额外注册的模型（配置里的 extra_models）也一并展示。
 	for _, extra := range extraModels(cfg) {
 		r, bare := SplitModelID(extra.ID)
-		region := cb.NormalizeRegion(r)
+		region := workbuddy.NormalizeRegion(r)
 		models = append(models, consoleModel{
 			ID:            bare,
 			ScopeID:       PrefixModelID(region, bare),
@@ -415,7 +415,7 @@ func listAccountSummaries(ctx context.Context, callbackID string) []accountSumma
 					modTime = fi.ModTime()
 				}
 			}
-			if credential, errParse := cb.ParseCredential(raw, defaultRealmForParse(cfg)); errParse == nil {
+			if credential, errParse := workbuddy.ParseCredential(raw, defaultRealmForParse(cfg)); errParse == nil {
 				summary.Realm = string(credential.Realm())
 				if nickname := credential.NicknameValue(); nickname != "" {
 					summary.Label = nickname
@@ -515,7 +515,7 @@ func handleCheckinRequest(req pluginapi.ManagementRequest) pluginapi.ManagementR
 	ctx, cancel := managementContext(req)
 	defer cancel()
 
-	results := runForAccounts(ctx, hostCallbackID(req), body.AccountIDs, func(ctx context.Context, credential *cb.Credential) (string, error) {
+	results := runForAccounts(ctx, hostCallbackID(req), body.AccountIDs, func(ctx context.Context, credential *workbuddy.Credential) (string, error) {
 		client := newUpstreamClient(ctx)
 		result, errCheckin := client.DailyCheckin(credential)
 		if errCheckin != nil {
@@ -532,7 +532,7 @@ func handleCheckinRequest(req pluginapi.ManagementRequest) pluginapi.ManagementR
 }
 
 // recordCheckinResult 把签到结果写入状态。
-func recordCheckinResult(credential *cb.Credential, result *cb.CheckinResult) {
+func recordCheckinResult(credential *workbuddy.Credential, result *workbuddy.CheckinResult) {
 	if credential == nil || result == nil {
 		return
 	}
@@ -597,7 +597,7 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 	cfg := loadedConfig()
 	type job struct {
 		entry      hostAuthEntry
-		credential *cb.Credential
+		credential *workbuddy.Credential
 	}
 	var preResults []quotaResult
 	jobs := make([]job, 0, len(entries))
@@ -634,7 +634,7 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 			})
 			continue
 		}
-		credential, errParse := cb.ParseCredential(raw, defaultRealmForParse(cfg))
+		credential, errParse := workbuddy.ParseCredential(raw, defaultRealmForParse(cfg))
 		if errParse != nil {
 			preResults = append(preResults, quotaResult{
 				AuthID:  firstNonEmptyString(entry.ID, entry.Name),
@@ -682,7 +682,7 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 }
 
 // summarizePackages 把资源包明细压成一行文字（供表格展示）。
-func summarizePackages(balance *cb.Balance) string {
+func summarizePackages(balance *workbuddy.Balance) string {
 	if balance == nil || len(balance.Packages) == 0 {
 		return ""
 	}
@@ -709,7 +709,7 @@ type accountActionResult struct {
 // runForAccounts 对指定账号（或全部账号）并发执行一个动作。
 //
 // 并发度有上限：任务类操作会在上游留下行为记录，全账号瞬间并发容易被风控注意到。
-func runForAccounts(ctx context.Context, callbackID string, targets []string, action func(context.Context, *cb.Credential) (string, error)) []accountActionResult {
+func runForAccounts(ctx context.Context, callbackID string, targets []string, action func(context.Context, *workbuddy.Credential) (string, error)) []accountActionResult {
 	entries, errList := listHostAuths(ctx, callbackID)
 	if errList != nil {
 		return []accountActionResult{{OK: false, Message: "读取账号列表失败：" + errList.Error()}}
@@ -722,7 +722,7 @@ func runForAccounts(ctx context.Context, callbackID string, targets []string, ac
 	cfg := loadedConfig()
 	type job struct {
 		entry      hostAuthEntry
-		credential *cb.Credential
+		credential *workbuddy.Credential
 	}
 	jobs := make([]job, 0, len(entries))
 	for _, entry := range entries {
@@ -738,7 +738,7 @@ func runForAccounts(ctx context.Context, callbackID string, targets []string, ac
 		if !okRaw {
 			continue
 		}
-		credential, errParse := cb.ParseCredential(raw, defaultRealmForParse(cfg))
+		credential, errParse := workbuddy.ParseCredential(raw, defaultRealmForParse(cfg))
 		if errParse != nil {
 			continue
 		}
@@ -892,7 +892,7 @@ func handleKeepaliveRequest(req pluginapi.ManagementRequest) pluginapi.Managemen
 	cfg := loadedConfig()
 	type job struct {
 		entry      hostAuthEntry
-		credential *cb.Credential
+		credential *workbuddy.Credential
 		rawJSON    []byte
 		filePath   string
 	}
@@ -905,7 +905,7 @@ func handleKeepaliveRequest(req pluginapi.ManagementRequest) pluginapi.Managemen
 		if !okRaw {
 			continue
 		}
-		credential, errParse := cb.ParseCredential(raw, defaultRealmForParse(cfg))
+		credential, errParse := workbuddy.ParseCredential(raw, defaultRealmForParse(cfg))
 		if errParse != nil {
 			continue
 		}
@@ -950,7 +950,7 @@ func handleKeepaliveRequest(req pluginapi.ManagementRequest) pluginapi.Managemen
 			res.OK = true
 			res.Message = "Token 续期成功"
 			// 写回宿主与磁盘
-			if updated, errMerge := cb.MergeStorageJSON(j.rawJSON, j.credential); errMerge == nil {
+			if updated, errMerge := workbuddy.MergeStorageJSON(j.rawJSON, j.credential); errMerge == nil {
 				if _, errSave := callHostScoped(callbackID, pluginabi.MethodHostAuthSave, pluginapi.HostAuthSaveRequest{
 					Name: j.entry.Name,
 					JSON: updated,
@@ -965,7 +965,7 @@ func handleKeepaliveRequest(req pluginapi.ManagementRequest) pluginapi.Managemen
 			if targetPath == "" && j.entry.Name != "" {
 				targetPath = filepath.Join("/root/.cli-proxy-api", j.entry.Name)
 			}
-			if errSave := cb.SaveCredentialFile(targetPath, j.credential); errSave != nil {
+			if errSave := workbuddy.SaveCredentialFile(targetPath, j.credential); errSave != nil {
 				logger.Debug("keepalive %s: save credential file failed: %v", label, errSave)
 			}
 			logger.Info("keepalive %s: token refreshed and saved", label)

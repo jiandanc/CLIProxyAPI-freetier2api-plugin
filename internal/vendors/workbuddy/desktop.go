@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现需要真实对话的辅助方法。
 //

@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"unsafe"
 
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/logger"
 )
 
 /*

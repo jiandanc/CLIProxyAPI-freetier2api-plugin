@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"time"
 
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/httpx"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/httpx"
 )
 
 // handleQuotaDescribe 描述本插件的额度能力。
@@ -82,7 +82,7 @@ func handleQuotaReset(request []byte) ([]byte, error) {
 //
 // 结构层次：Summary 放关键数字（宿主的额度卡片直接读它），
 // Groups/Buckets 放明细（展开后看）。
-func buildQuotaResponse(credential *cb.Credential, balance *cb.Balance) pluginapi.QuotaFetchResponse {
+func buildQuotaResponse(credential *workbuddy.Credential, balance *workbuddy.Balance) pluginapi.QuotaFetchResponse {
 	region := credential.Realm()
 	response := pluginapi.QuotaFetchResponse{
 		Subscription: &pluginapi.QuotaSubscription{
@@ -128,7 +128,7 @@ func buildQuotaResponse(credential *cb.Credential, balance *cb.Balance) pluginap
 }
 
 // realmDisplayName 返回域的展示名。
-func realmDisplayName(region cb.Region) string {
+func realmDisplayName(region workbuddy.Region) string {
 	if region.IsGlobal() {
 		return "国际版 (WorkBuddy AI)"
 	}

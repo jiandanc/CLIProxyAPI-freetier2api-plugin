@@ -14,9 +14,9 @@ import (
 	"fmt"
 	"strings"
 
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/logger"
-	"workbuddy2api-plugin/internal/tasks"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy/tasks"
 )
 
 // taskAction 是一个可自动完成的成长任务。
@@ -26,7 +26,7 @@ type taskAction struct {
 	// Desc 是任务说明（供管理页展示）。
 	Desc string
 	// Run 执行任务动作，返回可读的执行说明。
-	Run func(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error)
+	Run func(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error)
 	// UsesChat 标记该动作是否消耗真实对话额度。
 	UsesChat bool
 }
@@ -85,7 +85,7 @@ func autoActionIndex(code string) int {
 // runChatFive 上报 5 条对话活跃事件。
 //
 // 这是 first_buddy 的前置，因此排在动作表第一位。
-func runChatFive(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runChatFive(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	for index := 0; index < 5; index++ {
 		conversationID := fmt.Sprintf("wb2api-chat5-%d-%d", nowUnixMs(), index)
 		if errReport := client.ReportChatActivity(ctx, credential, conversationID, "", "", ""); errReport != nil {
@@ -99,12 +99,12 @@ func runChatFive(ctx context.Context, client *cb.Client, credential *cb.Credenti
 }
 
 // runFirstBuddy 领养第一只 Buddy（含前置活跃上报）。
-func runFirstBuddy(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runFirstBuddy(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	return tasks.RunTravel(ctx, client, credential), nil
 }
 
 // runModelChat 用 glm-5.2 发一次真实对话，并上报对齐模型的事件。
-func runModelChat(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runModelChat(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	conversationID := fmt.Sprintf("wb2api-glm-%d", nowUnixMs())
 	if errChat := client.DesktopChat(ctx, credential, "", "glm-5.2", "GLM-5.2", conversationID); errChat != nil {
 		return "", errChat
@@ -116,11 +116,11 @@ func runModelChat(ctx context.Context, client *cb.Client, credential *cb.Credent
 }
 
 // runRichMeow 上报桌面对话事件链（6 事件）。
-func runRichMeow(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runRichMeow(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	conversationID := fmt.Sprintf("wb2api-meow-%d", nowUnixMs())
-	requestID := cb.NewHexID()
+	requestID := workbuddy.NewHexID()
 	events := withDesktopFingerprint(credential,
-		tasks.DesktopChatSequence(conversationID, requestID, cb.NewHexID(), "fast-model", "fast-model"))
+		tasks.DesktopChatSequence(conversationID, requestID, workbuddy.NewHexID(), "fast-model", "fast-model"))
 	if errReport := client.ReportDesktopEvents(ctx, credential, events); errReport != nil {
 		return "", errReport
 	}
@@ -128,7 +128,7 @@ func runRichMeow(ctx context.Context, client *cb.Client, credential *cb.Credenti
 }
 
 // runBuddyApp 上报 Buddy 应用事件链（同时满足 Buddy_App 与 Buddy_App_QQ）。
-func runBuddyApp(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runBuddyApp(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	events := withDesktopFingerprint(credential,
 		tasks.DesktopBuddyAppSequence(tasks.DefaultBuddyID, tasks.DefaultBuddyName))
 	if errReport := client.ReportDesktopEvents(ctx, credential, events); errReport != nil {
@@ -138,7 +138,7 @@ func runBuddyApp(ctx context.Context, client *cb.Client, credential *cb.Credenti
 }
 
 // runAutomation 上报定时任务创建事件。
-func runAutomation(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runAutomation(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	events := withDesktopFingerprint(credential, tasks.DesktopAutomationCreateEvent("wb2api 自动化"))
 	if errReport := client.ReportDesktopEvents(ctx, credential, events); errReport != nil {
 		return "", errReport
@@ -147,7 +147,7 @@ func runAutomation(ctx context.Context, client *cb.Client, credential *cb.Creden
 }
 
 // runLibraryRead 上报资料库阅读事件（web 指纹）。
-func runLibraryRead(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runLibraryRead(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	const pageURL = "https://www.workbuddy.cn/space/d/o0KWYeynteVv06UnAZqIFm"
 	if errReport := client.ReportWebElementClick(ctx, credential, pageURL,
 		"library_doc_intro_click", "WorkBuddy资料库介绍"); errReport != nil {
@@ -157,14 +157,14 @@ func runLibraryRead(ctx context.Context, client *cb.Client, credential *cb.Crede
 }
 
 // runTemplateUse 上报模板使用事件组 ×5。
-func runTemplateUse(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runTemplateUse(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	templates := []struct{ id, name string }{
 		{"1", "深度研究"}, {"2", "周报生成"}, {"3", "竞品分析"},
 		{"4", "活动策划"}, {"5", "代码评审"},
 	}
 	for _, template := range templates {
 		conversationID := fmt.Sprintf("wb2api-tpl-%d-%s", nowUnixMs(), template.id)
-		requestID := cb.NewHexID()
+		requestID := workbuddy.NewHexID()
 		events := withDesktopFingerprint(credential,
 			tasks.DesktopTemplateUseSequence(conversationID, requestID, template.id, template.name))
 		if errReport := client.ReportDesktopEvents(ctx, credential, events); errReport != nil {
@@ -178,7 +178,7 @@ func runTemplateUse(ctx context.Context, client *cb.Client, credential *cb.Crede
 }
 
 // runPlaybookPrompt 上报灵感案例发送事件组。
-func runPlaybookPrompt(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runPlaybookPrompt(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	conversationID := fmt.Sprintf("wb2api-pb-%d", nowUnixMs())
 	requestID := fmt.Sprintf("wb2api-pb-req-%d", nowUnixMs())
 	events := withDesktopFingerprint(credential,
@@ -191,9 +191,9 @@ func runPlaybookPrompt(ctx context.Context, client *cb.Client, credential *cb.Cr
 }
 
 // runDesignCanvas 上报设计画布创建事件组。
-func runDesignCanvas(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runDesignCanvas(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	conversationID := fmt.Sprintf("wb2api-canvas-%d", nowUnixMs())
-	requestID := cb.NewHexID()
+	requestID := workbuddy.NewHexID()
 	events := withDesktopFingerprint(credential,
 		tasks.DesktopDesignCanvasSequence(conversationID, requestID))
 	if errReport := client.ReportDesktopEvents(ctx, credential, events); errReport != nil {
@@ -206,17 +206,17 @@ func runDesignCanvas(ctx context.Context, client *cb.Client, credential *cb.Cred
 //
 // 关键约束：expert_id 必须来自**专家市场**（自造 id 不入账），
 // 且真实对话的 requestId 必须取自**服务端 SSE**（自造 UUID 不计数）。
-func runExpertFive(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runExpertFive(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	return runExpertChain(ctx, client, credential, "agent", 5)
 }
 
 // runExpertTeam 专家团召唤 + 使用链 ×3。
-func runExpertTeam(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runExpertTeam(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	return runExpertChain(ctx, client, credential, "team", 3)
 }
 
 // runExpertChain 是专家类任务的共用实现。
-func runExpertChain(ctx context.Context, client *cb.Client, credential *cb.Credential, expertType string, count int) (string, error) {
+func runExpertChain(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential, expertType string, count int) (string, error) {
 	experts, errList := client.MarketExpertList(ctx, credential, expertType)
 	if errList != nil {
 		return "", errList
@@ -262,7 +262,7 @@ func runExpertChain(ctx context.Context, client *cb.Client, credential *cb.Crede
 // runAppearance 设置主题并上报皮肤生效事件。
 //
 // 两步缺一不可：**只调 set 接口不计分**，必须叠加事件。
-func runAppearance(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runAppearance(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	if errSet := client.DesktopAppearanceSet(ctx, credential, "theme-tkmw7j"); errSet != nil {
 		return "", errSet
 	}
@@ -277,7 +277,7 @@ func runAppearance(ctx context.Context, client *cb.Client, credential *cb.Creden
 }
 
 // runSkillFresh 真实对话 + 技能加载事件。
-func runSkillFresh(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runSkillFresh(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	conversationID := fmt.Sprintf("wb2api-skill-%d", nowUnixMs())
 	requestID, errChat := client.DesktopChatWithRequestID(ctx, credential, "", "fast-model", conversationID)
 	if errChat != nil {
@@ -298,12 +298,12 @@ func runSkillFresh(ctx context.Context, client *cb.Client, credential *cb.Creden
 //
 // 与普通专家链的三处差异（决定能否入账）：
 // agent_task_created 带 has_expert=true、expert_actual_use 的 mode 为 LOCAL 且 type 为空、cost 为 0。
-func runExpertLighthouse(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runExpertLighthouse(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	const expertID = "ex_2cvvUZQhDyeJ"
 	const expertName = "轻量云专家"
 	conversationID := fmt.Sprintf("wb2api-lighthouse-%d", nowUnixMs())
 
-	created := tasks.DesktopChatSequence(conversationID, cb.NewHexID(), cb.NewHexID(), "fast-model", "fast-model")
+	created := tasks.DesktopChatSequence(conversationID, workbuddy.NewHexID(), workbuddy.NewHexID(), "fast-model", "fast-model")
 	if len(created) > 0 {
 		created[0]["has_expert"] = true
 		created[0]["expert_id"] = expertID
@@ -338,12 +338,12 @@ func runExpertLighthouse(ctx context.Context, client *cb.Client, credential *cb.
 }
 
 // runBlackCat 夜猫子任务补足。
-func runBlackCat(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func runBlackCat(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	return tasks.RunBlackcat(ctx, client, credential)
 }
 
 // withDesktopFingerprint 给事件链注入桌面指纹。
-func withDesktopFingerprint(credential *cb.Credential, events []map[string]any) []map[string]any {
+func withDesktopFingerprint(credential *workbuddy.Credential, events []map[string]any) []map[string]any {
 	return tasks.ApplyDesktopFingerprint(credential, events)
 }
 

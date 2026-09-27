@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现成长任务的列表 / 报名 / 领奖接口。
 //

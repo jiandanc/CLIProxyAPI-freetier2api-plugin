@@ -7,7 +7,7 @@ command -v go >/dev/null 2>&1 || {
   exit 1
 }
 
-# 动态库扩展名按平台决定；产物名必须与 pluginID 一致（workbuddy2api）。
+# 动态库扩展名按平台决定；产物名必须与 pluginID 一致（freetier2api）。
 case "$(go env GOOS)" in
   windows) ext="dll" ;;
   darwin) ext="dylib" ;;
@@ -19,7 +19,7 @@ go test ./... -count=1
 CGO_ENABLED=1 go build \
   -buildvcs=false \
   -buildmode=c-shared \
-  -o "dist/workbuddy2api.${ext}" \
+  -o "dist/freetier2api.${ext}" \
   .
 
-echo "Built dist/workbuddy2api.${ext}"
+echo "Built dist/freetier2api.${ext}"

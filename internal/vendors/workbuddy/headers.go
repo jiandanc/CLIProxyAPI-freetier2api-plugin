@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件构造四类出站请求头。
 //

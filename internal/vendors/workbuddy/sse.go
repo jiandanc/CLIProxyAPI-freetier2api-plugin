@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现上游 SSE 流的处理：流式透传与非流式聚合。
 //

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"workbuddy2api-plugin/internal/cb"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // Streak 是连登状态。
@@ -38,7 +38,7 @@ type StreakTier struct {
 //  2. 领取新手礼包与活动补偿（每号一次，无则静默跳过）；
 //  3. 兑换所有已解锁档位；
 //  4. 抽完所有抽奖次数。
-func RunStreakBonus(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func RunStreakBonus(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	parts := make([]string, 0, 4)
 
 	if message := makeupYesterday(ctx, client, credential); message != "" {
@@ -50,8 +50,8 @@ func RunStreakBonus(ctx context.Context, client *cb.Client, credential *cb.Crede
 		name string
 		path string
 	}{
-		{"新手礼包", cb.ClaimGiftPath()},
-		{"活动补偿", cb.ClaimCompensationPath()},
+		{"新手礼包", workbuddy.ClaimGiftPath()},
+		{"活动补偿", workbuddy.ClaimCompensationPath()},
 	} {
 		if credit, errClaim := client.ClaimBillingReward(ctx, credential, claim.path); errClaim == nil && credit > 0 {
 			parts = append(parts, fmt.Sprintf("%s +%d", claim.name, credit))
@@ -102,7 +102,7 @@ func RunStreakBonus(ctx context.Context, client *cb.Client, credential *cb.Crede
 }
 
 // makeupYesterday 补签昨日（有漏签且有补签卡时）。
-func makeupYesterday(ctx context.Context, client *cb.Client, credential *cb.Credential) string {
+func makeupYesterday(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) string {
 	missed, errMissed := client.HeatmapYesterdayMissed(ctx, credential)
 	if errMissed != nil || !missed {
 		return ""
@@ -121,7 +121,7 @@ func makeupYesterday(ctx context.Context, client *cb.Client, credential *cb.Cred
 // RunTravel 执行单账号猫猫旅行的一个动作。
 //
 // 状态机：无猫 → 领养；有猫 → 按 status 分派（idle 派出 / arrived 领奖 / traveling 跳过）。
-func RunTravel(ctx context.Context, client *cb.Client, credential *cb.Credential) string {
+func RunTravel(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) string {
 	info, errInfo := client.BuddyInfo(ctx, credential)
 	if errInfo != nil {
 		return ""
@@ -167,7 +167,7 @@ const travelLocationID = 4
 //
 // **必须先上报一条活跃事件**：上游的 first_buddy 任务以「当日有活跃上报」
 // 为前置，缺了它领养恒失败于 "first_buddy task not completed yet"。
-func adoptBuddy(ctx context.Context, client *cb.Client, credential *cb.Credential) string {
+func adoptBuddy(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) string {
 	conversationID := fmt.Sprintf("wb2api-adopt-%d", nowUnixMs())
 	if errReport := client.ReportChatActivity(ctx, credential, conversationID, "", "", ""); errReport != nil {
 		return ""
@@ -190,7 +190,7 @@ func adoptBuddy(ctx context.Context, client *cb.Client, credential *cb.Credentia
 // RunBlackcat 补足夜猫子任务。
 //
 // 窗口外不做任何事（调用方应先检查），窗口内按差额补对话次数。
-func RunBlackcat(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func RunBlackcat(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	if !InNightWindow(time.Now()) {
 		return "", nil
 	}
@@ -232,7 +232,7 @@ func InNightWindow(now time.Time) bool {
 //
 // 活动期外静默返回（不报错）：活动结束后排程继续跑也不会做无用功，
 // 无需下线代码。
-func RunSchool(ctx context.Context, client *cb.Client, credential *cb.Credential) (string, error) {
+func RunSchool(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential) (string, error) {
 	status, errStatus := client.SchoolTasks(ctx, credential)
 	if errStatus != nil {
 		return "", errStatus
@@ -288,7 +288,7 @@ func RunSchool(ctx context.Context, client *cb.Client, credential *cb.Credential
 }
 
 // runSchoolTask 执行单个开学季任务的行为。
-func runSchoolTask(ctx context.Context, client *cb.Client, credential *cb.Credential, code string) error {
+func runSchoolTask(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential, code string) error {
 	switch code {
 	case "share_invite":
 		// 纯前端上报，服务端不校验真实分享回执。
@@ -318,7 +318,7 @@ func runSchoolTask(ctx context.Context, client *cb.Client, credential *cb.Creden
 		// 小程序专家链（用固定的返校季专家）。
 		conversationID := fmt.Sprintf("wb2api-exp-%d", nowUnixMs())
 		return client.ReportMPEvents(ctx, credential,
-			cb.SchoolExpertUseEvents(schoolExpertID, schoolExpertName, conversationID))
+			workbuddy.SchoolExpertUseEvents(schoolExpertID, schoolExpertName, conversationID))
 	}
 	return fmt.Errorf("unsupported school task %s", code)
 }
@@ -333,7 +333,7 @@ const (
 //
 // 上报 200 ≠ 计分：上游计分是异步的（实测 2.5 秒内落定），
 // 立即回读会误判「未达标」从而跳过领奖。
-func waitSchoolDone(ctx context.Context, client *cb.Client, credential *cb.Credential, code string) bool {
+func waitSchoolDone(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential, code string) bool {
 	for attempt := 0; attempt < schoolPollLoops; attempt++ {
 		if !sleepCtx(ctx, schoolPollGap) {
 			return false
@@ -352,7 +352,7 @@ func waitSchoolDone(ctx context.Context, client *cb.Client, credential *cb.Crede
 }
 
 // withFingerprint 给事件链注入桌面指纹（供包内直接调用 ReportDesktopEvents 的场景）。
-func withFingerprint(credential *cb.Credential, events []map[string]any) []map[string]any {
+func withFingerprint(credential *workbuddy.Credential, events []map[string]any) []map[string]any {
 	base := desktopFingerprint(credential)
 	out := make([]map[string]any, 0, len(events))
 	for _, event := range events {

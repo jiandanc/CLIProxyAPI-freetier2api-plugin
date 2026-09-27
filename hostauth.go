@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"workbuddy2api-plugin/cpasdk/pluginabi"
-	"workbuddy2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/cpasdk/pluginabi"
+	"freetier2api-plugin/cpasdk/pluginapi"
 )
 
 // hostAuthEntry 是宿主凭证列表里的一条。
@@ -106,7 +106,7 @@ func mergeAuthsAndFiles(auths, files []hostAuthEntry) []hostAuthEntry {
 	return out
 }
 
-// filenameHint 是凭证文件名的归属提示（与 cb.RegisterPathHint 一致）。
+// filenameHint 是凭证文件名的归属提示（与 workbuddy.RegisterPathHint 一致）。
 const filenameHint = "workbuddy"
 
 // filterPluginAuths 只保留属于本插件的凭证，并对重复条目（如同时出现在 Auths 与 Files 中）进行去重合并。

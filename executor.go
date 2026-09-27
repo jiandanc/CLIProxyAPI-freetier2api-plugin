@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"workbuddy2api-plugin/cpasdk/pluginabi"
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/httpx"
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/cpasdk/pluginabi"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/httpx"
+	"freetier2api-plugin/internal/logger"
 )
 
 const (
@@ -43,8 +43,8 @@ type rpcExecutorStreamResponse struct {
 // preparedExecution 汇集一次执行的同步校验结果。
 type preparedExecution struct {
 	rpc        executorRPCRequest
-	credential *cb.Credential
-	region     cb.Region
+	credential *workbuddy.Credential
+	region     workbuddy.Region
 	model      string
 }
 
@@ -59,11 +59,11 @@ func handleExecutorExecute(request []byte) ([]byte, error) {
 	defer cancel()
 
 	client := newUpstreamClient(ctx)
-	result, errChat := client.Chat(cb.ChatRequest{
+	result, errChat := client.Chat(workbuddy.ChatRequest{
 		Credential: prepared.credential,
 		Body:       prepared.rpc.Payload,
 		Model:      prepared.model,
-		ClientIP:   cb.ExtractClientIP(prepared.rpc.Headers),
+		ClientIP:   workbuddy.ExtractClientIP(prepared.rpc.Headers),
 		Meta:       chatMetaFor(prepared.rpc),
 	})
 	if errChat != nil {
@@ -109,11 +109,11 @@ func runStreamExecution(streamCtx context.Context, cancelStream context.CancelFu
 	ctx := httpx.WithCallbackID(streamCtx, prepared.rpc.HostCallbackID)
 	client := newUpstreamClient(ctx)
 
-	reader, errStream := client.ChatStream(cb.ChatRequest{
+	reader, errStream := client.ChatStream(workbuddy.ChatRequest{
 		Credential: prepared.credential,
 		Body:       prepared.rpc.Payload,
 		Model:      prepared.model,
-		ClientIP:   cb.ExtractClientIP(prepared.rpc.Headers),
+		ClientIP:   workbuddy.ExtractClientIP(prepared.rpc.Headers),
 		Meta:       chatMetaFor(prepared.rpc),
 	})
 	if errStream != nil {
@@ -130,7 +130,7 @@ func runStreamExecution(streamCtx context.Context, cancelStream context.CancelFu
 	streamID := prepared.rpc.StreamID
 	callbackID := prepared.rpc.HostCallbackID
 	failure := ""
-	_, errForward := cb.Stream(reader, cb.StreamOptions{
+	_, errForward := workbuddy.Stream(reader, workbuddy.StreamOptions{
 		Emit: func(payload []byte) error {
 			if errEmit := emitStreamChunk(callbackID, streamID, payload); errEmit != nil {
 				// 下游断开：取消上游读取，静默收尾（这不是错误）。
@@ -141,10 +141,10 @@ func runStreamExecution(streamCtx context.Context, cancelStream context.CancelFu
 		},
 		Hint: func(code string) string { return gatewayHint(code, prepared) },
 	})
-	if errForward != nil && !cb.IsEmptyStreamError(errForward) && streamCtx.Err() == nil {
+	if errForward != nil && !workbuddy.IsEmptyStreamError(errForward) && streamCtx.Err() == nil {
 		// 只有非取消的真实失败才报给下游；用户主动断开不该产生错误帧。
 		failure = streamFailureMessage(errForward)
-	} else if cb.IsEmptyStreamError(errForward) {
+	} else if workbuddy.IsEmptyStreamError(errForward) {
 		failure = "upstream returned an empty stream (no valid data events)"
 	}
 	closeStream(callbackID, streamID, failure)
@@ -214,10 +214,10 @@ func isChatFormat(format string) bool {
 //
 // 会话键来自请求体（客户端传的会话标识，或由 system+首条 user 派生），
 // 同一次请求内所有重试共用同一组头——上游后台按 X-Conversation-Request-ID 聚合。
-func chatMetaFor(rpc executorRPCRequest) cb.ChatMeta {
+func chatMetaFor(rpc executorRPCRequest) workbuddy.ChatMeta {
 	body := rpc.Payload
-	conversationKey := cb.ConversationKey(body)
-	turnKey := cb.TurnKey(body)
+	conversationKey := workbuddy.ConversationKey(body)
+	turnKey := workbuddy.TurnKey(body)
 
 	// 入站透传的链路 ID 优先（调用方可能已经建好了链路）。
 	traceID := ""
@@ -228,16 +228,16 @@ func chatMetaFor(rpc executorRPCRequest) cb.ChatMeta {
 	conversationRequestID := ""
 	switch {
 	case conversationKey != "" && turnKey != "":
-		conversationRequestID = cb.TurnRequestID(conversationKey + ":" + turnKey)
+		conversationRequestID = workbuddy.TurnRequestID(conversationKey + ":" + turnKey)
 	case turnKey != "":
-		conversationRequestID = cb.TurnRequestID(turnKey)
+		conversationRequestID = workbuddy.TurnRequestID(turnKey)
 	case conversationKey != "":
-		conversationRequestID = cb.RequestIDForKey(conversationKey)
+		conversationRequestID = workbuddy.RequestIDForKey(conversationKey)
 	default:
-		conversationRequestID = cb.TurnRequestID("")
+		conversationRequestID = workbuddy.TurnRequestID("")
 	}
 
-	return cb.ChatMeta{
+	return workbuddy.ChatMeta{
 		ConversationID:        conversationKey,
 		ConversationRequestID: conversationRequestID,
 		TraceID:               traceID,
@@ -335,7 +335,7 @@ func streamFailureMessage(err error) string {
 	if err == nil {
 		return ""
 	}
-	var upstreamErr *cb.Error
+	var upstreamErr *workbuddy.Error
 	if asUpstreamError(err, &upstreamErr) && strings.TrimSpace(upstreamErr.Msg) != "" {
 		return upstreamErr.Msg
 	}
@@ -347,7 +347,7 @@ func gatewayHint(code string, prepared preparedExecution) string {
 	trimmed := strings.TrimSpace(code)
 	switch trimmed {
 	case "11133":
-		if cb.HasImagePart(prepared.rpc.Payload) && !modelSupportsImages(prepared) {
+		if workbuddy.HasImagePart(prepared.rpc.Payload) && !modelSupportsImages(prepared) {
 			return "model " + prepared.model + " does not support images; pick one with image support from /v1/models"
 		}
 		return "request parameters were rejected by the model provider; check message format and model capabilities"
@@ -364,7 +364,7 @@ func gatewayHint(code string, prepared preparedExecution) string {
 }
 
 func modelSupportsImages(prepared preparedExecution) bool {
-	cached := cb.CachedModels()[prepared.region]
+	cached := workbuddy.CachedModels()[prepared.region]
 	for _, model := range cached {
 		if model.ID == prepared.model {
 			return model.SupportsImages

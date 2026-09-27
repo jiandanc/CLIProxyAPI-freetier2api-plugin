@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现上游错误分类。
 //

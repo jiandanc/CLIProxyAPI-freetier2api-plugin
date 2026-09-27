@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现出站请求体的指纹脱敏。
 //

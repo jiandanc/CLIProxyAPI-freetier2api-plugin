@@ -17,10 +17,10 @@ import (
 	"sync"
 	"time"
 
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/httpx"
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/httpx"
+	"freetier2api-plugin/internal/logger"
 )
 
 const (
@@ -36,7 +36,7 @@ const (
 	// 这里的缓存主要服务管理页轮询：30 秒既够用又能及时看到换号。
 	credentialCacheTTL = 30 * time.Second
 	// authParseFileNameHint 是凭证文件名识别提示。
-	authParseFileNameHint = cb.RegisterPathHint
+	authParseFileNameHint = workbuddy.RegisterPathHint
 )
 
 // authParseRPCRequest 与宿主的 auth.parse 请求对齐。
@@ -69,12 +69,12 @@ func handleAuthParse(request []byte) ([]byte, error) {
 		// 非 JSON 的凭证文件不归本插件处理。
 		return okEnvelope(pluginapi.AuthParseResponse{Handled: false})
 	}
-	if !cb.LooksLikeCredential(raw, rpc.FileName, rpc.Provider) {
+	if !workbuddy.LooksLikeCredential(raw, rpc.FileName, rpc.Provider) {
 		return okEnvelope(pluginapi.AuthParseResponse{Handled: false})
 	}
 
 	cfg := loadedConfig()
-	credential, errCredential := cb.ParseCredential(rpc.RawJSON, defaultRealmForParse(cfg))
+	credential, errCredential := workbuddy.ParseCredential(rpc.RawJSON, defaultRealmForParse(cfg))
 	if errCredential != nil {
 		return nil, newPluginError("workbuddy_credential_invalid", errCredential.Error(), http.StatusUnprocessableEntity)
 	}
@@ -92,15 +92,15 @@ func handleAuthParse(request []byte) ([]byte, error) {
 // defaultRealmForParse 决定解析无 realm 声明的凭证时使用的兜底域。
 //
 // 两个域都启用时兜底 cn（历史数据以 cn 为主）；只启用一个域时用它。
-func defaultRealmForParse(cfg pluginConfig) cb.Region {
-	if realmEnabled(cfg, string(cb.RegionCN)) {
-		return cb.RegionCN
+func defaultRealmForParse(cfg pluginConfig) workbuddy.Region {
+	if realmEnabled(cfg, string(workbuddy.RegionCN)) {
+		return workbuddy.RegionCN
 	}
-	return cb.RegionGlobal
+	return workbuddy.RegionGlobal
 }
 
 // buildAuthData 构造宿主契约的凭证记录。
-func buildAuthData(credential *cb.Credential, fileName string, storageJSON []byte) pluginapi.AuthData {
+func buildAuthData(credential *workbuddy.Credential, fileName string, storageJSON []byte) pluginapi.AuthData {
 	id := strings.TrimSuffix(fileName, ".json")
 	if id == "" {
 		id = credential.UIDValue()
@@ -121,7 +121,7 @@ func buildAuthData(credential *cb.Credential, fileName string, storageJSON []byt
 // credentialMetadata 是回给宿主的可变元数据。
 //
 // refresh_token 必须在这里（见文件头注释）；token 本身绝不回传。
-func credentialMetadata(credential *cb.Credential) map[string]any {
+func credentialMetadata(credential *workbuddy.Credential) map[string]any {
 	metadata := map[string]any{
 		"realm": string(credential.Realm()),
 	}
@@ -142,7 +142,7 @@ func credentialMetadata(credential *cb.Credential) map[string]any {
 }
 
 // credentialAttributes 是回给宿主的不可变属性（不含任何凭证材料）。
-func credentialAttributes(credential *cb.Credential) map[string]string {
+func credentialAttributes(credential *workbuddy.Credential) map[string]string {
 	attributes := map[string]string{
 		"realm": string(credential.Realm()),
 	}
@@ -196,7 +196,7 @@ func handleAuthRefresh(request []byte) ([]byte, error) {
 	}
 
 	storage := rpc.StorageJSON
-	if updated, errStorage := cb.MergeStorageJSON(rpc.StorageJSON, credential); errStorage == nil {
+	if updated, errStorage := workbuddy.MergeStorageJSON(rpc.StorageJSON, credential); errStorage == nil {
 		storage = updated
 	}
 	logger.Info("auth refresh succeeded for %s (realm=%s)", rpc.AuthID, credential.Realm())
@@ -207,7 +207,7 @@ func handleAuthRefresh(request []byte) ([]byte, error) {
 }
 
 // refreshedAuthData 在刷新后重建凭证记录，保留宿主侧的既有字段。
-func refreshedAuthData(rpc authRefreshRPCRequest, storageJSON []byte, credential *cb.Credential) pluginapi.AuthData {
+func refreshedAuthData(rpc authRefreshRPCRequest, storageJSON []byte, credential *workbuddy.Credential) pluginapi.AuthData {
 	data := buildAuthData(credential, rpc.AuthID, storageJSON)
 	// 保留宿主传入的标识字段，避免因插件重建而丢失。
 	if strings.TrimSpace(rpc.AuthID) != "" {
@@ -218,12 +218,12 @@ func refreshedAuthData(rpc authRefreshRPCRequest, storageJSON []byte, credential
 
 // isCredentialRejected 报告错误是否表示凭证真的失效。
 func isCredentialRejected(err error) bool {
-	var upstreamErr *cb.Error
+	var upstreamErr *workbuddy.Error
 	if !errors.As(err, &upstreamErr) {
 		return false
 	}
 	switch upstreamErr.Kind {
-	case cb.KindSessionDead, cb.KindHardCredit:
+	case workbuddy.KindSessionDead, workbuddy.KindHardCredit:
 		return true
 	}
 	return upstreamErr.Status == http.StatusUnauthorized || upstreamErr.Status == http.StatusForbidden
@@ -231,7 +231,7 @@ func isCredentialRejected(err error) bool {
 
 // credentialCacheEntry 是凭证回源查找的缓存项。
 type credentialCacheEntry struct {
-	credential *cb.Credential
+	credential *workbuddy.Credential
 	fetchedAt  time.Time
 }
 
@@ -247,10 +247,10 @@ var (
 // **必须支持回源**：宿主的管理端额度路由只发 AuthIndex/AuthID +
 // Metadata/Attributes，**不发 StorageJSON**；而插件设计上又不把 token 放进
 // metadata/attributes，因此只认 StorageJSON 会把额度查询误报成「凭证缺失」。
-func credentialForAuth(ctx context.Context, callbackID string, storageJSON []byte, authID string, attributes map[string]string) (*cb.Credential, error) {
+func credentialForAuth(ctx context.Context, callbackID string, storageJSON []byte, authID string, attributes map[string]string) (*workbuddy.Credential, error) {
 	cfg := loadedConfig()
 	if len(storageJSON) > 0 {
-		credential, errParse := cb.ParseCredential(storageJSON, defaultRealmForParse(cfg))
+		credential, errParse := workbuddy.ParseCredential(storageJSON, defaultRealmForParse(cfg))
 		if errParse == nil {
 			applyAttributeOverrides(credential, attributes)
 			return credential, nil
@@ -262,7 +262,7 @@ func credentialForAuth(ctx context.Context, callbackID string, storageJSON []byt
 		}
 		raw, errFetch := fetchAuthJSON(ctx, callbackID, trimmed)
 		if errFetch == nil && len(raw) > 0 {
-			credential, errParse := cb.ParseCredential(raw, defaultRealmForParse(cfg))
+			credential, errParse := workbuddy.ParseCredential(raw, defaultRealmForParse(cfg))
 			if errParse == nil {
 				applyAttributeOverrides(credential, attributes)
 				storeCredential(trimmed, credential)
@@ -277,16 +277,16 @@ func credentialForAuth(ctx context.Context, callbackID string, storageJSON []byt
 //
 // realm 允许被覆盖（账号可以自带域声明）；token 类字段不允许——
 // 属性里根本不该有它们，若出现也应忽略而不是采信。
-func applyAttributeOverrides(credential *cb.Credential, attributes map[string]string) {
+func applyAttributeOverrides(credential *workbuddy.Credential, attributes map[string]string) {
 	if credential == nil || len(attributes) == 0 {
 		return
 	}
 	if realm := strings.TrimSpace(attributes["realm"]); realm != "" {
-		credential.SetRealm(cb.NormalizeRegion(realm))
+		credential.SetRealm(workbuddy.NormalizeRegion(realm))
 	}
 }
 
-func cachedCredential(authID string) (*cb.Credential, bool) {
+func cachedCredential(authID string) (*workbuddy.Credential, bool) {
 	credentialCacheMu.Lock()
 	defer credentialCacheMu.Unlock()
 	entry, okEntry := credentialCache[authID]
@@ -296,7 +296,7 @@ func cachedCredential(authID string) (*cb.Credential, bool) {
 	return entry.credential, true
 }
 
-func storeCredential(authID string, credential *cb.Credential) {
+func storeCredential(authID string, credential *workbuddy.Credential) {
 	credentialCacheMu.Lock()
 	defer credentialCacheMu.Unlock()
 	credentialCache[authID] = credentialCacheEntry{credential: credential, fetchedAt: time.Now()}

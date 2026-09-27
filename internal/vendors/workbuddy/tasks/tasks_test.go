@@ -9,19 +9,19 @@ import (
 	"testing"
 	"time"
 
-	"workbuddy2api-plugin/internal/cb"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // testCredential 构造一个测试凭证。
-func testCredential(uid string) *cb.Credential {
-	credential := &cb.Credential{
+func testCredential(uid string) *workbuddy.Credential {
+	credential := &workbuddy.Credential{
 		AccessToken:  "at",
 		RefreshToken: "rt",
 		UID:          uid,
 		Nickname:     "测试账号",
 		Domain:       "www.codebuddy.cn",
 	}
-	credential.SetRealm(cb.RegionCN)
+	credential.SetRealm(workbuddy.RegionCN)
 	return credential
 }
 

@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现四套客户端指纹的行为上报。
 //

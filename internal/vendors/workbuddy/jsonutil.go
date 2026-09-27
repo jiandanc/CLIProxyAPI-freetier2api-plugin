@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件提供请求体解码的小工具。
 //

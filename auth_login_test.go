@@ -9,7 +9,7 @@ package main
 import (
 	"testing"
 
-	"workbuddy2api-plugin/internal/cb"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // TestIsLoginPendingRecognizesUpstreamCode 验证 11217 被识别为待授权。
@@ -19,15 +19,15 @@ func TestIsLoginPendingRecognizesUpstreamCode(t *testing.T) {
 		err  error
 		want bool
 	}{
-		{"upstream 11217 login ing", &cb.Error{
-			Kind: cb.KindClient, Status: 200,
+		{"upstream 11217 login ing", &workbuddy.Error{
+			Kind: workbuddy.KindClient, Status: 200,
 			Msg: `11217 11217:login ing... {"code":11217,"msg":"11217:login ing..."}`,
 		}, true},
-		{"plain pending wording", &cb.Error{Kind: cb.KindClient, Status: 200, Msg: "authorization pending"}, true},
-		{"waiting wording", &cb.Error{Kind: cb.KindClient, Status: 200, Msg: "waiting for user"}, true},
-		{"not found means not yet authorized", &cb.Error{Kind: cb.KindNotFound, Status: 404, Msg: "not found"}, true},
+		{"plain pending wording", &workbuddy.Error{Kind: workbuddy.KindClient, Status: 200, Msg: "authorization pending"}, true},
+		{"waiting wording", &workbuddy.Error{Kind: workbuddy.KindClient, Status: 200, Msg: "waiting for user"}, true},
+		{"not found means not yet authorized", &workbuddy.Error{Kind: workbuddy.KindNotFound, Status: 404, Msg: "not found"}, true},
 		// 真失败不能被当成待授权，否则会一直轮询到超时。
-		{"invalid state is fatal", &cb.Error{Kind: cb.KindClient, Status: 400, Msg: "invalid state"}, false},
+		{"invalid state is fatal", &workbuddy.Error{Kind: workbuddy.KindClient, Status: 400, Msg: "invalid state"}, false},
 		{"nil error", nil, false},
 	}
 	for _, testCase := range cases {

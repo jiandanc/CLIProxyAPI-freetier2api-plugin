@@ -9,11 +9,11 @@ import (
 	"context"
 	"fmt"
 
-	"workbuddy2api-plugin/cpasdk/pluginabi"
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/logger"
-	"workbuddy2api-plugin/internal/tasks"
+	"freetier2api-plugin/cpasdk/pluginabi"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy/tasks"
 )
 
 // runCheckinAll 执行全账号签到。
@@ -86,7 +86,7 @@ func runActivityAll(ctx context.Context) {
 //
 // 只观测不重试：上报本身按天幂等，重试没有意义，但已知上游存在
 // 「200 但静默丢弃」的形态，留下日志便于对账。
-func checkActivityStreak(ctx context.Context, client *cb.Client, account *accountContext) {
+func checkActivityStreak(ctx context.Context, client *workbuddy.Client, account *accountContext) {
 	streak, errStreak := client.GrowthStreak(ctx, account.credential)
 	if errStreak != nil {
 		logger.Debug("activity %s: streak check failed: %v", account.label(), errStreak)
@@ -114,7 +114,7 @@ func runKeepaliveAll(ctx context.Context) {
 		}
 		raw, okRaw := getAuthJSONByIndex(ctx, account.callbackID, account.entry.AuthIndex)
 		if okRaw {
-			if updated, errMerge := cb.MergeStorageJSON(raw, account.credential); errMerge == nil {
+			if updated, errMerge := workbuddy.MergeStorageJSON(raw, account.credential); errMerge == nil {
 				if _, errSave := callHostScoped(account.callbackID, pluginabi.MethodHostAuthSave, pluginapi.HostAuthSaveRequest{
 					Name: account.entry.Name,
 					JSON: updated,
@@ -123,7 +123,7 @@ func runKeepaliveAll(ctx context.Context) {
 				}
 			}
 		}
-		if errSave := cb.SaveCredentialFile(account.credential.FilePath, account.credential); errSave != nil {
+		if errSave := workbuddy.SaveCredentialFile(account.credential.FilePath, account.credential); errSave != nil {
 			logger.Debug("keepalive %s: save credential failed: %v", account.label(), errSave)
 		}
 		logger.Info("keepalive %s: token refreshed and saved", account.label())

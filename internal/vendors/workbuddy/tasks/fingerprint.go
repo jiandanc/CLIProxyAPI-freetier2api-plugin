@@ -20,7 +20,7 @@ import (
 	"context"
 	"time"
 
-	"workbuddy2api-plugin/internal/cb"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // 节流参数。全部照抄原项目实测值——这些数字是风控边界，
@@ -56,13 +56,13 @@ var (
 // fingerprint 生成某个账号某用途的稳定设备标识。
 //
 // 36 位 hex（18 字节），与官方客户端的设备 id 长度一致。
-// 跨重启稳定、账号间互异、部署间隔离（混入机器盐，见 cb.SetInstallSalt）。
-func fingerprint(credential *cb.Credential, purpose string) string {
-	return cb.DeriveID(credential.UIDValue(), purpose)
+// 跨重启稳定、账号间互异、部署间隔离（混入机器盐，见 workbuddy.SetInstallSalt）。
+func fingerprint(credential *workbuddy.Credential, purpose string) string {
+	return workbuddy.DeriveID(credential.UIDValue(), purpose)
 }
 
 func randomHex(n int) string {
-	return cb.RandomHex(n)
+	return workbuddy.RandomHex(n)
 }
 
 // nowUnixMs 返回当前毫秒时间戳。
@@ -72,7 +72,7 @@ func nowUnixMs() int64 { return time.Now().UnixMilli() }
 //
 // 这些字段共同把请求标识成「来自一台固定的 Windows 桌面客户端」。
 // 业务字段可以覆盖它们（map 合并时业务优先）。
-func desktopFingerprint(credential *cb.Credential) map[string]any {
+func desktopFingerprint(credential *workbuddy.Credential) map[string]any {
 	now := nowUnixMs()
 	return map[string]any{
 		"timezone":     "Asia/Shanghai",
@@ -335,12 +335,12 @@ const SchoolSeasonActivityID = "school_open_day_2026"
 
 // 桌面指纹族请求上下文。
 type desktopContext struct {
-	credential *cb.Credential
+	credential *workbuddy.Credential
 	events     []map[string]any
 }
 
 // run 让事件带上指纹并发出去。
-func (c *desktopContext) run(ctx context.Context, client *cb.Client) error {
+func (c *desktopContext) run(ctx context.Context, client *workbuddy.Client) error {
 	base := desktopFingerprint(c.credential)
 	merged := make([]map[string]any, 0, len(c.events))
 	for _, event := range c.events {
@@ -350,14 +350,14 @@ func (c *desktopContext) run(ctx context.Context, client *cb.Client) error {
 }
 
 // ApplyDesktopFingerprint 给事件链注入桌面指纹（导出给 main 包编排使用）。
-func ApplyDesktopFingerprint(credential *cb.Credential, events []map[string]any) []map[string]any {
+func ApplyDesktopFingerprint(credential *workbuddy.Credential, events []map[string]any) []map[string]any {
 	return withFingerprint(credential, events)
 }
 
 // DesktopExpertSummonSequence 构造专家召唤链（3 事件）。
 //
 // 关键字段：id 必须是市场真实 ex_ id，type 取专家的首个分类。
-func DesktopExpertSummonSequence(expert cb.MarketExpert) []map[string]any {
+func DesktopExpertSummonSequence(expert workbuddy.MarketExpert) []map[string]any {
 	category := expert.Category
 	if category == "" {
 		category = "expert-all"
@@ -387,7 +387,7 @@ func DesktopExpertSummonSequence(expert cb.MarketExpert) []map[string]any {
 // DesktopExpertActualUseEvent 构造专家实际使用事件。
 //
 // requestId 必须是**真实对话的服务端 id**：自造 UUID 不会被计分。
-func DesktopExpertActualUseEvent(expert cb.MarketExpert, conversationID, requestID string) []map[string]any {
+func DesktopExpertActualUseEvent(expert workbuddy.MarketExpert, conversationID, requestID string) []map[string]any {
 	category := expert.Category
 	if category == "" {
 		category = "expert-all"

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"workbuddy2api-plugin/cpasdk/pluginabi"
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
+	"freetier2api-plugin/cpasdk/pluginabi"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // TestRegisterReturnsFullContract 验证注册响应满足宿主契约。
@@ -479,7 +479,7 @@ func TestExecutorRejectsUnsupportedFormat(t *testing.T) {
 		t.Fatalf("unsupported format must produce an error envelope, got %s", raw)
 	}
 
-	_ = cb.RegionCN
+	_ = workbuddy.RegionCN
 	_ = http.StatusOK
 }
 
@@ -547,7 +547,7 @@ func TestManagementAutoAllRouteDispatched(t *testing.T) {
 
 	raw, err := handleMethod(pluginabi.MethodManagementHandle, mustMarshal(pluginapi.ManagementRequest{
 		Method: "POST",
-		Path:   "/v0/management/plugins/workbuddy2api/tasks/auto_all",
+		Path:   "/v0/management/plugins/freetier2api/tasks/auto_all",
 	}))
 	if err != nil {
 		t.Fatalf("handleMethod error: %v", err)
@@ -569,7 +569,7 @@ func TestPrepareBodyPromptModes(t *testing.T) {
 	baseJSON := []byte(`{"model":"cn:glm-5.2","messages":[{"role":"system","content":"old sys"},{"role":"user","content":"hello"}]}`)
 
 	// 1. passthrough
-	outPass := cb.PrepareBody(baseJSON, cb.PrepareOptions{
+	outPass := workbuddy.PrepareBody(baseJSON, workbuddy.PrepareOptions{
 		Model:      "glm-5.2",
 		PromptMode: "passthrough",
 		PromptText: "custom prompt",
@@ -585,7 +585,7 @@ func TestPrepareBodyPromptModes(t *testing.T) {
 	}
 
 	// 2. custom
-	outCustom := cb.PrepareBody(baseJSON, cb.PrepareOptions{
+	outCustom := workbuddy.PrepareBody(baseJSON, workbuddy.PrepareOptions{
 		Model:      "glm-5.2",
 		PromptMode: "custom",
 		PromptText: "pure prompt",
@@ -598,7 +598,7 @@ func TestPrepareBodyPromptModes(t *testing.T) {
 	}
 
 	// 3. append
-	outAppend := cb.PrepareBody(baseJSON, cb.PrepareOptions{
+	outAppend := workbuddy.PrepareBody(baseJSON, workbuddy.PrepareOptions{
 		Model:      "glm-5.2",
 		PromptMode: "append",
 		PromptText: "appended rule",

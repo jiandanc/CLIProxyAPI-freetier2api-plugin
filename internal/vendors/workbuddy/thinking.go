@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件处理 DeepSeek 系的思维链。
 //

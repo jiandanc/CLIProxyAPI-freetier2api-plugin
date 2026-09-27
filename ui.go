@@ -4,7 +4,7 @@ package main
 //
 // 安全约定（三条硬性边界）：
 //   - 页面本身**不含任何账号、额度或凭证数据**，是纯静态 HTML；
-//   - 页面通过 CPA 的管理接口（/v0/management/plugins/workbuddy2api/...）按需拉取数据，
+//   - 页面通过 CPA 的管理接口（/v0/management/plugins/freetier2api/...）按需拉取数据，
 //     需要操作者提供管理密钥；
 //   - 渲染动态数据统一走 textContent，避免把上游/账号名当成 HTML 注入。
 //
@@ -207,7 +207,7 @@ progress { width: 160px; height: 8px; }
   // HOST_MGMT 是**宿主**提供的管理接口前缀（OAuth 登录等）。
   //
   // 这两个不能混用：宿主按 "/v0/management/<provider>-auth-url" 从路径里
-  // 提取 provider，若带上插件前缀会得到 "plugins/workbuddy2api/workbuddy"，
+  // 提取 provider，若带上插件前缀会得到 "plugins/freetier2api/workbuddy"，
   // 校验失败直接 404（页面表现为 "The string did not match the expected pattern."）。
   var HOST_MGMT = "/v0/management";
   var logSeq = 0;

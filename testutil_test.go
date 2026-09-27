@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"workbuddy2api-plugin/cpasdk/pluginabi"
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
+	"freetier2api-plugin/cpasdk/pluginabi"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // testCallbackID 是测试用的宿主回调 ID。
@@ -335,7 +335,7 @@ func resetPluginGlobals(t *testing.T) {
 
 	resetCredentialCache()
 	// 模型目录缓存是包级的：不重置会让上一个用例的探测结果泄漏到下一个。
-	cb.ResetModelCacheForTest()
+	workbuddy.ResetModelCacheForTest()
 
 	loginStoreMu.Lock()
 	loginStore = map[string]*pendingLogin{}
@@ -403,7 +403,7 @@ func registerRequest(t *testing.T, cfg pluginConfig) []byte {
 
 // sampleCredentialJSON 构造一份凭证 JSON（嵌套形态）。
 func sampleCredentialJSON(realm, uid string) string {
-	region := cb.NormalizeRegion(realm)
+	region := workbuddy.NormalizeRegion(realm)
 	return fmt.Sprintf(`{
   "auth": {"accessToken": "at-%s", "refreshToken": "rt-%s", "expiresAt": %d, "domain": "%s", "realm": "%s"},
   "account": {"uid": "%s", "enterpriseId": "ent-1", "nickname": "账号%s"},

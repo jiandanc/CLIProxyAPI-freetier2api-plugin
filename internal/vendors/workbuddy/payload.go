@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现「OpenAI 请求体 → CodeBuddy 请求体」的改写管线。
 //

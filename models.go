@@ -21,10 +21,10 @@ import (
 	"sync"
 	"time"
 
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/httpx"
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/httpx"
+	"freetier2api-plugin/internal/logger"
 )
 
 // staticModelRPCRequest 与宿主的 model.static 请求对齐。
@@ -95,7 +95,7 @@ func staticModels(ctx context.Context) ([]pluginapi.ModelInfo, error) {
 	cfg := loadedConfig()
 	var all []pluginapi.ModelInfo
 	var firstErr error
-	for _, region := range []cb.Region{cb.RegionCN, cb.RegionGlobal} {
+	for _, region := range []workbuddy.Region{workbuddy.RegionCN, workbuddy.RegionGlobal} {
 		if !realmEnabled(cfg, string(region)) {
 			continue
 		}
@@ -113,7 +113,7 @@ func staticModels(ctx context.Context) ([]pluginapi.ModelInfo, error) {
 	}
 	for _, extra := range extraModels(cfg) {
 		r, bare := SplitModelID(extra.ID)
-		region := cb.NormalizeRegion(r)
+		region := workbuddy.NormalizeRegion(r)
 		if !isModelDisabled(region, bare) {
 			all = append(all, extra)
 		}
@@ -148,7 +148,7 @@ func staticModels(ctx context.Context) ([]pluginapi.ModelInfo, error) {
 }
 
 // modelsForRealm 返回某个域的可用模型（裸模型名，已过滤该域禁用项）。
-func modelsForRealm(ctx context.Context, region cb.Region) ([]pluginapi.ModelInfo, error) {
+func modelsForRealm(ctx context.Context, region workbuddy.Region) ([]pluginapi.ModelInfo, error) {
 	client := newUpstreamClient(ctx)
 	models, errModels := client.FetchModels(region)
 	if errModels != nil {
@@ -177,13 +177,13 @@ func extraModels(cfg pluginConfig) []pluginapi.ModelInfo {
 		}
 		// 配置里可以带域前缀，也可以不带（不带则两个域都注册）。
 		if realm, bareModel := SplitModelID(bare); realm != "" {
-			region := cb.NormalizeRegion(realm)
+			region := workbuddy.NormalizeRegion(realm)
 			if realmEnabled(cfg, string(region)) {
 				out = append(out, extraModelInfo(region, bareModel))
 			}
 			continue
 		}
-		for _, region := range []cb.Region{cb.RegionCN, cb.RegionGlobal} {
+		for _, region := range []workbuddy.Region{workbuddy.RegionCN, workbuddy.RegionGlobal} {
 			if realmEnabled(cfg, string(region)) {
 				out = append(out, extraModelInfo(region, bare))
 			}
@@ -193,11 +193,11 @@ func extraModels(cfg pluginConfig) []pluginapi.ModelInfo {
 }
 
 // extraModelInfo 构造一条额外模型条目。
-func extraModelInfo(region cb.Region, bareModel string) pluginapi.ModelInfo {
-	return ModelInfoToPluginAPI(region, cb.ModelInfo{
+func extraModelInfo(region workbuddy.Region, bareModel string) pluginapi.ModelInfo {
+	return ModelInfoToPluginAPI(region, workbuddy.ModelInfo{
 		ID:            bareModel,
 		Name:          bareModel,
-		ContextWindow: cb.DefaultContextWindowFor(bareModel),
+		ContextWindow: workbuddy.DefaultContextWindowFor(bareModel),
 	})
 }
 
@@ -207,7 +207,7 @@ var (
 )
 
 // publishEffortTables 把模型清单里的档位信息按域合并发布给对话路径。
-func publishEffortTables(region cb.Region, models []cb.ModelInfo) {
+func publishEffortTables(region workbuddy.Region, models []workbuddy.ModelInfo) {
 	defaults := make(map[string]string, len(models))
 	supported := make(map[string][]string, len(models))
 	for _, model := range models {
@@ -218,7 +218,7 @@ func publishEffortTables(region cb.Region, models []cb.ModelInfo) {
 			supported[model.ID] = model.Efforts
 		}
 	}
-	cb.SetEffortTablesForRegion(region, defaults, supported)
+	workbuddy.SetEffortTablesForRegion(region, defaults, supported)
 }
 
 // applyModelCatalog 在注册/重配置时预热模型缓存。
@@ -226,7 +226,7 @@ func publishEffortTables(region cb.Region, models []cb.ModelInfo) {
 // 灌入上次的状态缓存能让 /v1/models 立刻有内容，不必等首次上游探测完成。
 func applyModelCatalog(cfg pluginConfig) {
 	// 注入模型探测用的凭证来源：从宿主列出的凭证里挑第一个可用的。
-	cb.SetProbeCredentialFunc(func(region cb.Region) *cb.Credential {
+	workbuddy.SetProbeCredentialFunc(func(region workbuddy.Region) *workbuddy.Credential {
 		return probeCredentialForRegion(region)
 	})
 
@@ -235,12 +235,12 @@ func applyModelCatalog(cfg pluginConfig) {
 		return
 	}
 	for region, models := range cached {
-		cb.LoadCachedModels(models, region)
+		workbuddy.LoadCachedModels(models, region)
 	}
 }
 
 // probeCredentialForRegion 为模型探测取一个该域的可用凭证。
-func probeCredentialForRegion(region cb.Region) *cb.Credential {
+func probeCredentialForRegion(region workbuddy.Region) *workbuddy.Credential {
 	ctx := context.Background()
 	entries, errList := listHostAuths(ctx, "")
 	if errList != nil {
@@ -256,7 +256,7 @@ func probeCredentialForRegion(region cb.Region) *cb.Credential {
 		if !okStored {
 			continue
 		}
-		credential, errParse := cb.ParseCredential(stored, defaultRealmForParse(cfg))
+		credential, errParse := workbuddy.ParseCredential(stored, defaultRealmForParse(cfg))
 		if errParse != nil {
 			continue
 		}
@@ -268,15 +268,15 @@ func probeCredentialForRegion(region cb.Region) *cb.Credential {
 }
 
 // loadCachedModelsFromState 从状态文件读取上次缓存的模型清单。
-func loadCachedModelsFromState() map[cb.Region][]cb.ModelInfo {
+func loadCachedModelsFromState() map[workbuddy.Region][]workbuddy.ModelInfo {
 	state := snapshotState()
 	if state.ModelsFetchedAt == "" || len(state.Models) == 0 {
 		return nil
 	}
-	out := map[cb.Region][]cb.ModelInfo{}
+	out := map[workbuddy.Region][]workbuddy.ModelInfo{}
 	for _, cached := range state.Models {
-		region := cb.NormalizeRegion(cached.Realm)
-		out[region] = append(out[region], cb.ModelInfo{
+		region := workbuddy.NormalizeRegion(cached.Realm)
+		out[region] = append(out[region], workbuddy.ModelInfo{
 			ID:                 cached.ID,
 			Name:               cached.Name,
 			ContextWindow:      cached.ContextLength,
@@ -294,8 +294,8 @@ func loadCachedModelsFromState() map[cb.Region][]cb.ModelInfo {
 }
 
 // persistModels 把探测结果写回状态文件，供下次启动预热。
-func persistModels(client *cb.Client) {
-	cached := cb.CachedModels()
+func persistModels(client *workbuddy.Client) {
+	cached := workbuddy.CachedModels()
 	if len(cached) == 0 {
 		return
 	}
@@ -331,7 +331,7 @@ func refreshModelsFromUpstream(ctx context.Context) (int, error) {
 	client := newUpstreamClient(ctx)
 	total := 0
 	var firstErr error
-	for _, region := range []cb.Region{cb.RegionCN, cb.RegionGlobal} {
+	for _, region := range []workbuddy.Region{workbuddy.RegionCN, workbuddy.RegionGlobal} {
 		if !realmEnabled(cfg, string(region)) {
 			continue
 		}

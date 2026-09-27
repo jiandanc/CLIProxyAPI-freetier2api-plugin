@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件测试协议核心：错误分类、请求体改写、凭证解析、前缀协议、
 // 工具配对与脱敏。这些都是「顺序敏感」的逻辑，最容易在重构中静默退化。
@@ -279,11 +279,13 @@ func TestLooksLikeCredential(t *testing.T) {
 		// 强证据：显式声明。
 		{"host provider hint", map[string]any{}, "x.json", ProviderKey, true},
 		{"type field", map[string]any{"type": ProviderKey}, "x.json", "", true},
-		{"type field uppercase", map[string]any{"type": "WorkBuddy"}, "x.json", "", true},
+		{"type field uppercase", map[string]any{"type": "FreeTier"}, "x.json", "", true},
 
-		// 文件名约定。
+		// 文件名约定。CN 与 GLOBAL 是独立供应商，两者都要被本协议认出
+		// （具体区域由 core.ResolveVendor 的前缀匹配决定）。
 		{"filename exact", map[string]any{"foo": "bar"}, "workbuddy.json", "", true},
-		{"filename dash suffix", map[string]any{"foo": "bar"}, "workbuddy-abc.json", "", true},
+		{"filename cn vendor", map[string]any{"foo": "bar"}, "workbuddycn-abc.json", "", true},
+		{"filename global vendor", map[string]any{"foo": "bar"}, "workbuddyglobal-abc.json", "", true},
 		{"filename underscore suffix", map[string]any{"foo": "bar"}, "workbuddy_abc.json", "", true},
 		{"filename contains segment", map[string]any{"foo": "bar"}, "my-workbuddy.json", "", true},
 

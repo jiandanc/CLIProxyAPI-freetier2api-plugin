@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件是 CodeBuddy 协议的客户端核心：请求发送、统一信封处理、凭证刷新、
 // 设备指纹派生与出站 HTTP 客户端构造。
@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"workbuddy2api-plugin/internal/httpx"
+	"freetier2api-plugin/internal/httpx"
 )
 
 const (

@@ -19,6 +19,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 var (
@@ -89,12 +91,13 @@ func TestRegistryManifestIsValid(t *testing.T) {
 //
 // 宿主按 {id}{ext} 找动态库；ID 与文件名不一致会让插件静默不被加载。
 func TestPluginIDMatchesLibraryName(t *testing.T) {
-	if pluginID != "workbuddy2api" {
+	if pluginID != "freetier2api" {
 		t.Fatalf("pluginID = %q; changing it requires renaming the build output and registry", pluginID)
 	}
-	// providerKey 在 cb 包与 main 包各定义一次（凭证归属判定与注册都用它），必须一致。
-	if providerKey != cbProviderKey {
-		t.Fatalf("providerKey (%q) must match the cb package value (%q)", providerKey, cbProviderKey)
+	// providerKey 在 workbuddy 包（凭证归属判定）与 main 包（注册）各取一次，
+	// 必须一致——不一致会让凭证归属判定失效。
+	if workbuddy.ProviderKey != providerKey {
+		t.Fatalf("workbuddy.ProviderKey (%q) must match main.providerKey (%q)", workbuddy.ProviderKey, providerKey)
 	}
 }
 
@@ -220,7 +223,7 @@ func TestConsolePageWiresHostOAuthLogin(t *testing.T) {
 	}
 	// 这两个接口在**宿主根路径**下（/v0/management/<provider>-auth-url），
 	// 不能带插件前缀：宿主按路径提取 provider，带前缀会得到
-	// "plugins/workbuddy2api/workbuddy"，校验失败直接 404。
+	// "plugins/freetier2api/workbuddy"，校验失败直接 404。
 	if !strings.Contains(page, "hostPath(") {
 		t.Fatal("host-level OAuth endpoints must not be prefixed with the plugin path")
 	}

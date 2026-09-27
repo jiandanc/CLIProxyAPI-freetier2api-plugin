@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/logger"
 )
 
 // stateVersion 是状态文件结构版本，用于将来迁移。
@@ -241,7 +241,7 @@ func configureInstallSalt(cfg pluginConfig) error {
 	if errSalt != nil {
 		return errSalt
 	}
-	cb.SetInstallSalt(salt)
+	workbuddy.SetInstallSalt(salt)
 	return nil
 }
 

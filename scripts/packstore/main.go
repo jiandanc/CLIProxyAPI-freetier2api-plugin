@@ -14,7 +14,7 @@
 //
 // 两种模式：
 //
-//	打包：  packstore -lib dist/workbuddy2api-linux-amd64.so -id workbuddy2api \
+//	打包：  packstore -lib dist/freetier2api-linux-amd64.so -id freetier2api \
 //	                 -version 0.1.0 -goos linux -goarch amd64 -out-dir dist
 //	校验和：packstore -checksums-dir dist      # 汇总目录下所有 *.zip → checksums.txt
 //

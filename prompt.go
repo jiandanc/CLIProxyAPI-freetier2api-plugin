@@ -17,8 +17,8 @@ import (
 	"strings"
 	"sync"
 
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/logger"
 )
 
 //go:embed prompt_default.md
@@ -98,7 +98,7 @@ func promptDegradedActive() bool {
 
 // ApplyPrompt 按当前模式改写请求体的 system 消息。
 func ApplyPrompt(body []byte) []byte {
-	return cb.PrepareBody(body, cb.PrepareOptions{
+	return workbuddy.PrepareBody(body, workbuddy.PrepareOptions{
 		PromptMode: promptModeFor(),
 		PromptText: promptTextFor(loadedConfig()),
 	})

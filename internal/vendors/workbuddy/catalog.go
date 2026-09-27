@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现模型目录：从上游探测模型清单、缓存，并提供窗口与档位的查找链。
 

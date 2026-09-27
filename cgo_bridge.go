@@ -16,7 +16,7 @@ import "C"
 import (
 	"unsafe"
 
-	"workbuddy2api-plugin/cpasdk/pluginabi"
+	"freetier2api-plugin/cpasdk/pluginabi"
 )
 
 // cliproxy_plugin_init 由宿主在加载动态库后调用一次。

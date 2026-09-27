@@ -15,9 +15,9 @@ import (
 	"strings"
 	"sync"
 
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/logger"
 )
 
 var (
@@ -40,7 +40,7 @@ func reloadDisabledModelCache(disabled []string) {
 }
 
 // isModelDisabled 检查指定域下的模型是否被禁用（支持 scoped 如 cn:model 与裸名）。
-func isModelDisabled(region cb.Region, modelID string) bool {
+func isModelDisabled(region workbuddy.Region, modelID string) bool {
 	bare := strings.TrimSpace(modelID)
 	if bare == "" {
 		return false
@@ -127,7 +127,7 @@ func toggleVerb(disabled bool) string {
 }
 
 // filterDisabledModelsForRealm 从某域的模型清单里剔除已被禁用的模型。
-func filterDisabledModelsForRealm(region cb.Region, models []pluginapi.ModelInfo) []pluginapi.ModelInfo {
+func filterDisabledModelsForRealm(region workbuddy.Region, models []pluginapi.ModelInfo) []pluginapi.ModelInfo {
 	out := make([]pluginapi.ModelInfo, 0, len(models))
 	for _, model := range models {
 		if isModelDisabled(region, model.ID) {
@@ -141,7 +141,7 @@ func filterDisabledModelsForRealm(region cb.Region, models []pluginapi.ModelInfo
 // withDisabledFlag 给控制台页的模型清单打上禁用标记。
 func withDisabledFlag(models []consoleModel) []consoleModel {
 	for index := range models {
-		r := cb.NormalizeRegion(models[index].Realm)
+		r := workbuddy.NormalizeRegion(models[index].Realm)
 		models[index].Disabled = isModelDisabled(r, models[index].ID)
 	}
 	return models

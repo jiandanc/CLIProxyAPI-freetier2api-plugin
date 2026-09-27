@@ -96,7 +96,7 @@ jobs:
           mkdir -p dist
           go build -buildmode=c-shared -trimpath \
             -ldflags "-s -w -X main.pluginVersion=${VERSION}" \
-            -o "dist/workbuddy2api-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.ext }}" .
+            -o "dist/freetier2api-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.ext }}" .
           ls -la dist
 
       # 插件商店安装要求归档名 {id}_{version}_{goos}_{goarch}.zip，
@@ -110,8 +110,8 @@ jobs:
           set -euo pipefail
           # 归档名里的版本号是 tag 去掉前导 v（宿主按同样规则从 tag 推导）。
           go run ./scripts/packstore \
-            -lib "dist/workbuddy2api-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.ext }}" \
-            -id workbuddy2api \
+            -lib "dist/freetier2api-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.ext }}" \
+            -id freetier2api \
             -version "${VERSION_TAG#v}" \
             -goos ${{ matrix.goos }} \
             -goarch ${{ matrix.goarch }} \
@@ -119,10 +119,10 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: workbuddy2api-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: freetier2api-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
-            dist/workbuddy2api-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.ext }}
-            dist/workbuddy2api_*_${{ matrix.goos }}_${{ matrix.goarch }}.zip
+            dist/freetier2api-${{ matrix.goos }}-${{ matrix.goarch }}.${{ matrix.ext }}
+            dist/freetier2api_*_${{ matrix.goos }}_${{ matrix.goarch }}.zip
           if-no-files-found: error
 
   release:
@@ -197,11 +197,11 @@ jobs:
             echo
             echo '| 平台 | 下载文件 | 放进去时改名为 |'
             echo '| --- | --- | --- |'
-            echo '| Linux x86_64 | `workbuddy2api-linux-amd64.so` | `workbuddy2api.so` |'
-            echo '| Linux arm64 | `workbuddy2api-linux-arm64.so` | `workbuddy2api.so` |'
-            echo '| macOS Apple Silicon | `workbuddy2api-darwin-arm64.dylib` | `workbuddy2api.dylib` |'
-            echo '| macOS Intel | `workbuddy2api-darwin-amd64.dylib` | `workbuddy2api.dylib` |'
-            echo '| Windows x64 | `workbuddy2api-windows-amd64.dll` | `workbuddy2api.dll` |'
+            echo '| Linux x86_64 | `freetier2api-linux-amd64.so` | `freetier2api.so` |'
+            echo '| Linux arm64 | `freetier2api-linux-arm64.so` | `freetier2api.so` |'
+            echo '| macOS Apple Silicon | `freetier2api-darwin-arm64.dylib` | `freetier2api.dylib` |'
+            echo '| macOS Intel | `freetier2api-darwin-amd64.dylib` | `freetier2api.dylib` |'
+            echo '| Windows x64 | `freetier2api-windows-amd64.dll` | `freetier2api.dll` |'
             echo
             echo '`SHA256SUMS.txt` 可用于校验完整性；配置与账号导入见仓库 README。'
             echo

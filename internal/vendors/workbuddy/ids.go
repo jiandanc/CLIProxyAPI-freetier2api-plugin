@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件生成请求标识与从请求体里提取会话键。
 

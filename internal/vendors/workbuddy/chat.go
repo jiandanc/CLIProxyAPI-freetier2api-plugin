@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现对话调用：请求构造、出站、错误分类与流式读取。
 

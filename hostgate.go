@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"workbuddy2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/logger"
 )
 
 const (

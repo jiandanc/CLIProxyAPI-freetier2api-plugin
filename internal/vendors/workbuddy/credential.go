@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现凭证的解析与写回。
 //
@@ -15,7 +15,16 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"freetier2api-plugin/internal/core"
 )
+
+// protocolName 是本协议在文件名里的公共标识段。
+//
+// CN 与 GLOBAL 的凭证文件名分别是 workbuddycn-<uid>.json 与
+// workbuddyglobal-<uid>.json，两者都含 "workbuddy" 段，因此用它做协议级
+// 的文件名识别；具体区域由 core.ResolveVendor 的完整前缀匹配决定。
+const protocolName = "workbuddy"
 
 // Credential 是归一化后的账号凭证。
 type Credential struct {
@@ -424,20 +433,23 @@ func SaveCredentialFile(path string, cred *Credential) error {
 	return nil
 }
 
-// LooksLikeCredential 判断一份 JSON 是否属于本插件。
+// LooksLikeCredential 判断一份 JSON 是否属于本插件（任意区域）。
 //
 // **归属判定必须偏严**：宿主会把所有非内建格式的凭证文件依次喂给每个插件，
 // 一旦误吞别家的凭证，宿主会用它写出本插件的凭证结构，等于污染了对方的账号
 // （而且这个错误是静默的）。反过来，漏认只是加载失败，用户立刻会发现。
 //
 // 因此只接受**本插件特有的证据**，从强到弱：
-//  1. 文件里的 type 字段或宿主传入的 provider 提示是 workbuddy；
-//  2. 文件名符合本插件的命名约定（workbuddy 前缀/中缀）；
+//  1. 文件里的 type 字段或宿主传入的 provider 提示是 freetier；
+//  2. 文件名符合本插件的命名约定（workbuddycn / workbuddyglobal 前缀/中缀）；
 //  3. 具备本插件独有的嵌套结构（auth.accessToken + auth.refreshToken）。
 //
 // 刻意**不**接受顶层的 accessToken / refreshToken / device_token：
 // 这些是通用字段，别的 provider 也用（例如某些插件同样写 device_token），
 // 拿它们做判据必然跨插件误吞。
+//
+// 注意：本函数只判断「属于本协议」，**不判断区域**——区域由 core.ResolveVendor
+// 的文件名前缀与 vendor 字段决定，或由具体 vendor 实例的 Match 二次确认。
 func LooksLikeCredential(raw map[string]any, fileName, provider string) bool {
 	// 1) 显式声明（最可靠，也是推荐的写法）。
 	if strings.EqualFold(strings.TrimSpace(provider), ProviderKey) {
@@ -464,22 +476,30 @@ func LooksLikeCredential(raw map[string]any, fileName, provider string) bool {
 	return false
 }
 
-// fileNameMatchesConvention 判断文件名是否符合本插件的命名约定。
+// fileNameMatchesConvention 判断文件名是否符合本协议的命名约定。
 //
-// 约定：workbuddy.json / workbuddy-<id>.json / workbuddy_<id>.json，
-// 或名字里含 workbuddy 段（如 my-workbuddy.json）。
+// 约定（前缀 + 分隔符 + 标识）：
+//
+//	workbuddy.json / workbuddy-<id>.json / workbuddy_<id>.json
+//	workbuddycn-<id>.json / workbuddyglobal-<id>.json
+//	my-workbuddycn.json（含 -<标识> 段）
+//
+// 三个标识都要试：供应商 ID（workbuddycn / workbuddyglobal）是首选写法，
+// 裸 workbuddy 是历史遗留与手写凭证的常见形态，两者都要认。
 func fileNameMatchesConvention(fileName string) bool {
 	base := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(fileName), ".json"))
 	if base == "" {
 		return false
 	}
-	if base == ProviderKey {
-		return true
-	}
-	for _, separator := range []string{"-", "_", "."} {
-		if strings.HasPrefix(base, ProviderKey+separator) ||
-			strings.Contains(base, separator+ProviderKey) {
+	for _, name := range []string{VendorIDCN, VendorIDGlobal, protocolName} {
+		if base == name {
 			return true
+		}
+		for _, separator := range []string{"-", "_", "."} {
+			if strings.HasPrefix(base, name+separator) ||
+				strings.Contains(base, separator+name) {
+				return true
+			}
 		}
 	}
 	return false
@@ -487,6 +507,10 @@ func fileNameMatchesConvention(fileName string) bool {
 
 // ProviderKey 是本插件在 CPA 里占用的 provider 键。
 //
-// 定义在 cb 包而非 main：凭证归属判定需要它，而判定逻辑属于协议层。
-// main 里有一份同名常量用于注册，两者必须一致（见 .go 文件的编译期断言）。
-const ProviderKey = "workbuddy"
+// **所有供应商共用它**：宿主的 auth.identifier 只返回单个字符串、注册期调一次
+// 永久缓存，且与 auth 文件的 type 字段严格相等才认领该文件。因此供应商的区分
+// 落在凭证文件名前缀（workbuddycn-<uid>.json）与文件内的 vendor 字段上，
+// 而不是 provider key。
+//
+// 唯一来源是 core.ProviderKey（core 不 import vendors，因此这里引用它不成环）。
+const ProviderKey = core.ProviderKey

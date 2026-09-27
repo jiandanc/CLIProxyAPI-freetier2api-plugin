@@ -24,8 +24,8 @@ import (
 	"sync"
 	"time"
 
-	"workbuddy2api-plugin/cpasdk/pluginabi"
-	"workbuddy2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/cpasdk/pluginabi"
+	"freetier2api-plugin/cpasdk/pluginapi"
 )
 
 // HostCaller 是宿主回调实现，由 package main 注入。

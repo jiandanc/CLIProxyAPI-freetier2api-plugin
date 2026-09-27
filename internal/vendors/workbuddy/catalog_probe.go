@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现模型清单的上游探测。
 //

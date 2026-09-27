@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现账号级接口：余额查询、签到、注册激活与试用领取。
 

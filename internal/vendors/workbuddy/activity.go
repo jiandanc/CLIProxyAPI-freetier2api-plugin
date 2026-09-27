@@ -1,4 +1,4 @@
-package cb
+package workbuddy
 
 // 本文件实现成长体系的活动接口：连登、旅行、夜猫子、开学季、礼包与补偿。
 //

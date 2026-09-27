@@ -20,10 +20,10 @@ import (
 	"sync"
 	"time"
 
-	"workbuddy2api-plugin/cpasdk/pluginapi"
-	"workbuddy2api-plugin/internal/cb"
-	"workbuddy2api-plugin/internal/logger"
-	"workbuddy2api-plugin/internal/tasks"
+	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy/tasks"
 )
 
 // 队列参数。
@@ -190,7 +190,7 @@ func scanOneAccount(ctx context.Context, account *accountContext) accountScan {
 //   - locked → 跳过（锁定链上的任务报名不落账，只会白跑）；
 //   - 无对应动作 → 跳过（需客户端内交互的任务）；
 //   - 已达标未领奖 → **入队**（队列会自动领奖）。
-func pendingGrowthItem(task cb.Task) (taskItem, bool) {
+func pendingGrowthItem(task workbuddy.Task) (taskItem, bool) {
 	if task.Claimed || task.Locked {
 		return taskItem{}, false
 	}
@@ -209,7 +209,7 @@ func pendingGrowthItem(task cb.Task) (taskItem, bool) {
 }
 
 // pendingSchoolItem 判断开学季任务是否应该入队。
-func pendingSchoolItem(task cb.SchoolTask) (taskItem, bool) {
+func pendingSchoolItem(task workbuddy.SchoolTask) (taskItem, bool) {
 	switch task.Code {
 	case "task_student_verify":
 		// 需微信真实学生认证，无法自动化。
@@ -249,9 +249,9 @@ func schoolTaskTitle(code string) string {
 }
 
 // mergeTasks 按任务码合并两个任务列表（后者只补缺失）。
-func mergeTasks(primary, extra []cb.Task) []cb.Task {
+func mergeTasks(primary, extra []workbuddy.Task) []workbuddy.Task {
 	seen := make(map[string]bool, len(primary))
-	out := make([]cb.Task, 0, len(primary)+len(extra))
+	out := make([]workbuddy.Task, 0, len(primary)+len(extra))
 	for _, task := range primary {
 		seen[task.Code] = true
 		out = append(out, task)
@@ -554,7 +554,7 @@ func acceptPendingTasks(ctx context.Context, account *accountContext) int {
 		if status == "accepted" || status == "completed" || status == "claimed" {
 			continue
 		}
-		if autoActionFor(task.Code) == nil && !cb.IsMPTaskCode(task.Code) {
+		if autoActionFor(task.Code) == nil && !workbuddy.IsMPTaskCode(task.Code) {
 			continue
 		}
 		codes = append(codes, task.Code)
@@ -624,8 +624,8 @@ func runGrowthTask(ctx context.Context, account *accountContext, code string) (s
 //
 // 上报 200 ≠ 计分：上游计分是异步的（实测 5-8 秒落定），
 // 立即回读会误判未达标从而跳过领奖。
-func waitGrowthClaimable(ctx context.Context, client *cb.Client, credential *cb.Credential, code string) bool {
-	mp := cb.IsMPTaskCode(code)
+func waitGrowthClaimable(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential, code string) bool {
+	mp := workbuddy.IsMPTaskCode(code)
 	attempts := 4
 	if mp {
 		attempts = 2
@@ -652,10 +652,10 @@ func waitGrowthClaimable(ctx context.Context, client *cb.Client, credential *cb.
 }
 
 // findGrowthTask 按任务码查任务（自动选择默认或小程序口径）。
-func findGrowthTask(ctx context.Context, client *cb.Client, credential *cb.Credential, code string) (*cb.Task, error) {
-	var list []cb.Task
+func findGrowthTask(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential, code string) (*workbuddy.Task, error) {
+	var list []workbuddy.Task
 	var errList error
-	if cb.IsMPTaskCode(code) {
+	if workbuddy.IsMPTaskCode(code) {
 		list, errList = client.ListTasksMP(ctx, credential)
 	} else {
 		list, errList = client.ListTasks(ctx, credential)
@@ -672,8 +672,8 @@ func findGrowthTask(ctx context.Context, client *cb.Client, credential *cb.Crede
 }
 
 // claimGrowthReward 领取任务奖励。
-func claimGrowthReward(ctx context.Context, client *cb.Client, credential *cb.Credential, code string) (int64, int64) {
-	if cb.IsMPTaskCode(code) {
+func claimGrowthReward(ctx context.Context, client *workbuddy.Client, credential *workbuddy.Credential, code string) (int64, int64) {
+	if workbuddy.IsMPTaskCode(code) {
 		credit, energy, errClaim := client.ClaimRewardMP(ctx, credential, code)
 		if errClaim != nil {
 			logger.Debug("claim mp reward for %s failed: %v", code, errClaim)
