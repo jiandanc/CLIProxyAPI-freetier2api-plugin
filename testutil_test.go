@@ -336,11 +336,8 @@ func resetPluginGlobals(t *testing.T) {
 	resetCredentialCache()
 	// 模型目录缓存是包级的：不重置会让上一个用例的探测结果泄漏到下一个。
 	workbuddy.ResetModelCacheForTest()
-
-	loginStoreMu.Lock()
-	loginStore = map[string]*pendingLogin{}
-	loginStoreMu.Unlock()
-	loginPollMinGap = loginPollInterval
+	// 登录会话缓存也是包级的：清空避免上一个用例的会话泄漏到下一个。
+	workbuddy.ResetLoginStoreForTest()
 
 	currentQueue.mu.Lock()
 	currentQueue.running = false
@@ -408,7 +405,7 @@ func sampleCredentialJSON(realm, uid string) string {
   "auth": {"accessToken": "at-%s", "refreshToken": "rt-%s", "expiresAt": %d, "domain": "%s", "realm": "%s"},
   "account": {"uid": "%s", "enterpriseId": "ent-1", "nickname": "账号%s"},
   "device_token": "dt-%s"
-}`, uid, uid, time.Now().Add(24*time.Hour).Unix(), defaultDomainFor(region), region, uid, uid, uid)
+}`, uid, uid, time.Now().Add(24*time.Hour).Unix(), workbuddy.DefaultDomainFor(region), region, uid, uid, uid)
 }
 
 // 小工具。

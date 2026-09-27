@@ -138,6 +138,35 @@ type CheckinResult struct {
 	Message string
 }
 
+// LoginSupport 由「是否有登录流程」需要被提前告知的供应商实现。
+//
+// 页面要在渲染「添加账号」下拉时就知道点哪一项会发起登录、点哪一项该提示
+// 手填凭证——OpenCode ZEN 是纯 API key，点它发起登录只会拿到一个「不支持」。
+//
+// **刻意做成声明式而不是探测式**：探测的唯一办法是调一次 LoginStart，
+// 而那对支持的供应商会真的向上游申请一个设备码（有副作用）。一个只读的
+// 列表接口不该产生上游请求。
+//
+// 未实现该接口的供应商按「支持登录」处理：绝大多数供应商都有登录，
+// 不实现的默认行为应当是最常见的那个。
+type LoginSupport interface {
+	// SupportsLogin 报告本供应商是否提供登录流程。
+	SupportsLogin() bool
+}
+
+// AuthModeReporter 由「凭证本身就是敏感材料」的供应商实现。
+//
+// 目前只有 apikey 型供应商需要它：OAuth / 设备令牌账号展示的是昵称或邮箱
+// （本就不敏感），而 API key 就是凭证本身——页面是明文 HTML，把完整 key
+// 渲染进去等于把它写进浏览器缓存、截图和录屏里。
+//
+// 做成可选接口而不是塞进 Vendor：绝大多数供应商的凭证不是敏感材料，
+// 不必被迫实现一个恒返回 "oauth" 的方法。
+type AuthModeReporter interface {
+	// AuthMode 返回凭证形态：apikey / oauth / device。
+	AuthMode() string
+}
+
 // Task 是一个可执行的任务动作。
 type Task struct {
 	// Code 是任务标识（供应商内唯一）。
@@ -146,4 +175,20 @@ type Task struct {
 	Desc string
 	// UsesChat 标记该任务是否消耗真实对话额度。
 	UsesChat bool
+}
+
+// StorageMerger 由「刷新后需要把新凭证合并回原文件」的供应商实现。
+//
+// 为什么需要这个接口：各家的凭证 JSON 结构不同（WorkBuddy 是嵌套的
+// auth/account，Qoder 是扁平字段，Cline 是 accessToken/refreshToken 平铺），
+// 通用合并会把顶层字段写乱，而**只让一家实现**又会让其它家的续期永远无法
+// 落盘（表现为「明明刷新成功了，重启后又变回旧 token」）。
+//
+// 做成可选接口而不是塞进 Vendor：不需要合并的供应商（如纯 API key 的
+// OpenCodeZEN，凭证没有会变的字段）不必被迫实现一个恒等变换。
+type StorageMerger interface {
+	// MergeStorageJSON 把刷新后的凭证合并回 original，返回新的完整 JSON。
+	//
+	// credential 是刷新后的归一化凭证，实现应从它的 Native 取回协议层凭证。
+	MergeStorageJSON(original []byte, credential *Credential) ([]byte, error)
 }

@@ -1,47 +1,35 @@
 package main
 
-// 本文件实现 OAuth 设备授权登录。
+// 本文件实现 auth.login 的 ABI 分发：把宿主的登录请求路由到对应的供应商。
 //
-// 流程（与原项目的 cmd/login 一致）：
-//  1. 向 /v2/plugin/auth/state 取 state，拿到用户需要打开的授权链接；
-//  2. 用户在浏览器里完成授权；
-//  3. 轮询 /v2/plugin/auth/token 换 token，再用 /v2/plugin/login/account 取账号信息；
-//  4. 组装凭证 JSON，交给宿主落盘成 auth 文件。
+// 登录协议本身**由供应商实现**（各自的 login.go）：
+//   - WorkBuddy 是自有 state/token 三接口（internal/vendors/workbuddy/login.go）；
+//   - Qoder 是标准 PKCE 设备码流（internal/vendors/qoder/login.go）；
+//   - Cline 是 WorkOS OAuth 2.0 设备码（internal/vendors/cline/login.go）；
+//   - OpenCode ZEN 没有登录（纯 API key）。
 //
-// 宿主只列它自己硬编码的 OAuth provider，插件不出现在那份列表里，
-// 因此登录入口由插件的控制台页提供。
+// 根层只负责：从 Metadata 解析目标供应商、校验区域开关、把会话路由回去。
+// 会话是供应商自己建的，id 只存在于它的状态表里，根层不参与。
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
 	"freetier2api-plugin/internal/core"
 	"freetier2api-plugin/internal/httpx"
 	"freetier2api-plugin/internal/logger"
-	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 const (
-	// loginSessionTTL 是登录会话的有效期。
-	loginSessionTTL = 15 * time.Minute
-	// loginPollInterval 是插件侧轮询上游的最小间隔（防止过于频繁）。
-	loginPollInterval = 2 * time.Second
 	// loginHTTPTimeout 是单次登录相关请求的上限。
 	loginHTTPTimeout = 30 * time.Second
-	// loginUAPlatform 是登录链路的平台标识。
-	loginUAPlatform = "CLI"
-	// loginClientUA 是登录链路的 UA。
-	loginClientUA = "CLI/2.63.2 CodeBuddy/2.63.2"
 )
 
 // loginStartRPCRequest 与宿主的 auth.login.start 请求对齐。
@@ -56,60 +44,9 @@ type loginPollRPCRequest struct {
 	HostCallbackID string `json:"host_callback_id,omitempty"`
 }
 
-// pendingLogin 是一次进行中的登录会话。
-type pendingLogin struct {
-	region    workbuddy.Region
-	state     string
-	createdAt time.Time
-	// lastPoll 记录上次向上游轮询的时刻（节流）。
-	lastPoll time.Time
-}
-
-var (
-	loginStoreMu     sync.Mutex
-	loginStore       = map[string]*pendingLogin{}
-	loginPollMinGap  = loginPollInterval
-	loginStoreLastGC time.Time
-)
-
-// storeLoginSession 记录一次进行中的登录会话（含过期 GC）。
-func storeLoginSession(sessionID string, session *pendingLogin) {
-	loginStoreMu.Lock()
-	gcLoginSessionsLocked()
-	loginStore[sessionID] = session
-	loginStoreMu.Unlock()
-}
-
-// takeLoginSession 取出登录会话，同时应用节流。
-//
-// 节流是必要的：控制台页会频繁轮询，但不该每次都打上游。
-// 返回 ok=false 表示会话不存在或已过期。
-func takeLoginSession(sessionID string) (*pendingLogin, bool) {
-	loginStoreMu.Lock()
-	defer loginStoreMu.Unlock()
-	session, okSession := loginStore[sessionID]
-	if okSession && time.Since(session.createdAt) > loginSessionTTL {
-		delete(loginStore, sessionID)
-		return nil, false
-	}
-	if !okSession {
-		return nil, false
-	}
-	if time.Since(session.lastPoll) < loginPollMinGap {
-		// 仍在节流窗口内：返回会话但标记为「本轮不打上游」。
-		// 调用方据 lastPoll 判断——这里直接返回 pending 由调用方处理更清晰，
-		// 因此用一个零值 lastPoll 表示需要等待。
-		return session, false
-	}
-	session.lastPoll = time.Now()
-	return session, true
-}
-
 // handleAuthLoginStart 开始一次登录，返回用户需要打开的授权链接。
 //
-// 登录协议**由供应商实现**：WorkBuddy 是自有 state/token 三接口，
-// Qoder 是标准 PKCE 设备码流，两者形状完全不同。根层只负责从 Metadata
-// 解析出目标供应商并按区域开关校验。
+// 登录协议由供应商实现，根层只做供应商路由与区域开关校验。
 func handleAuthLoginStart(request []byte) ([]byte, error) {
 	var rpc loginStartRPCRequest
 	if errDecode := decodeRequest(request, &rpc); errDecode != nil {
@@ -171,7 +108,7 @@ type loginSessionOwner interface {
 // vendorForLogin 从登录请求的 Metadata 解析目标供应商。
 //
 // 控制台页把用户选的供应商标识放在 Metadata 的 vendor 字段里；
-// 缺失时回落到配置里启用的第一个区域（兼容旧版页面只传 realm 的情况）。
+// 缺失时回落到配置里启用的第一个供应商（兼容旧版页面只传 realm 的情况）。
 func vendorForLogin(metadata map[string]any) (core.Vendor, error) {
 	if metadata != nil {
 		if rawVendor, okVendor := metadata[core.VendorKey].(string); okVendor {
@@ -248,270 +185,27 @@ func firstVendorForRegion(region string) (core.Vendor, bool) {
 	return nil, false
 }
 
-// loginRegion 从 Metadata 解析目标域。
-func loginRegion(metadata map[string]any) workbuddy.Region {
-	if metadata != nil {
-		if raw, okRaw := metadata["realm"].(string); okRaw && strings.TrimSpace(raw) != "" {
-			return workbuddy.NormalizeRegion(raw)
-		}
-	}
-	cfg := loadedConfig()
-	if realmEnabled(cfg, string(workbuddy.RegionCN)) {
-		return workbuddy.RegionCN
-	}
-	return workbuddy.RegionGlobal
-}
-
-// loginAccount 是登录流程取到的账号信息。
-type loginAccount struct {
-	uid          string
-	nickname     string
-	domain       string
-	enterpriseID string
-}
-
-// requestLoginState 取 state 并构造用户授权链接。
-func requestLoginState(ctx context.Context, region workbuddy.Region) (state, authURL string, err error) {
-	endpoints := workbuddy.GetEndpoints(region)
-	url := endpoints.ChatBase + "/v2/plugin/auth/state?platform=" + loginUAPlatform
-	// 上游要求 POST 带 JSON body（空对象即可）；不带 body 时部分节点返回异常。
-	req, errReq := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader("{}"))
-	if errReq != nil {
-		return "", "", fmt.Errorf("build login state request: %w", errReq)
-	}
-	applyLoginHeaders(req, region)
-
-	raw, errCall := doLoginRequest(req)
-	if errCall != nil {
-		return "", "", errCall
-	}
-	var payload struct {
-		State string `json:"state"`
-		URL   string `json:"url"`
-		// 部分形态把链接放在 authUrl / loginUrl 里。
-		AuthURL  string `json:"authUrl"`
-		LoginURL string `json:"loginUrl"`
-	}
-	if errUnmarshal := json.Unmarshal(raw, &payload); errUnmarshal != nil {
-		return "", "", fmt.Errorf("decode login state: %w", errUnmarshal)
-	}
-	state = strings.TrimSpace(payload.State)
-	authURL = firstNonEmptyString(payload.URL, payload.AuthURL, payload.LoginURL)
-	if state == "" || authURL == "" {
-		return "", "", fmt.Errorf("login state response is incomplete")
-	}
-	return state, authURL, nil
-}
-
-// exchangeLoginToken 用 state 换 token。
-func exchangeLoginToken(ctx context.Context, region workbuddy.Region, state string) (accessToken, refreshToken string, err error) {
-	endpoints := workbuddy.GetEndpoints(region)
-	url := endpoints.ChatBase + "/v2/plugin/auth/token?state=" + url.QueryEscape(state)
-	req, errReq := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if errReq != nil {
-		return "", "", fmt.Errorf("build login token request: %w", errReq)
-	}
-	applyLoginHeaders(req, region)
-
-	raw, errCall := doLoginRequest(req)
-	if errCall != nil {
-		return "", "", errCall
-	}
-	var payload struct {
-		AccessToken  string `json:"accessToken"`
-		RefreshToken string `json:"refreshToken"`
-	}
-	if errUnmarshal := json.Unmarshal(raw, &payload); errUnmarshal != nil {
-		return "", "", fmt.Errorf("decode login token: %w", errUnmarshal)
-	}
-	if strings.TrimSpace(payload.AccessToken) == "" {
-		return "", "", fmt.Errorf("login token response has no accessToken")
-	}
-	return strings.TrimSpace(payload.AccessToken), strings.TrimSpace(payload.RefreshToken), nil
-}
-
-// fetchLoginAccount 取账号信息。
-func fetchLoginAccount(ctx context.Context, region workbuddy.Region, state, accessToken string) (loginAccount, error) {
-	endpoints := workbuddy.GetEndpoints(region)
-	url := endpoints.ChatBase + "/v2/plugin/login/account?state=" + url.QueryEscape(state)
-	req, errReq := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if errReq != nil {
-		return loginAccount{}, fmt.Errorf("build login account request: %w", errReq)
-	}
-	applyLoginHeaders(req, region)
-	// 该端点用刚拿到的 token 鉴权（原项目同样带 Bearer）。
-	if strings.TrimSpace(accessToken) != "" {
-		req.Header.Set("Authorization", "Bearer "+accessToken)
-	}
-
-	raw, errCall := doLoginRequest(req)
-	if errCall != nil {
-		return loginAccount{}, errCall
-	}
-	var payload struct {
-		UID          string `json:"uid"`
-		Nickname     string `json:"nickname"`
-		Domain       string `json:"domain"`
-		EnterpriseID string `json:"enterpriseId"`
-	}
-	if errUnmarshal := json.Unmarshal(raw, &payload); errUnmarshal != nil {
-		return loginAccount{}, fmt.Errorf("decode login account: %w", errUnmarshal)
-	}
-	return loginAccount{
-		uid:          strings.TrimSpace(payload.UID),
-		nickname:     strings.TrimSpace(payload.Nickname),
-		domain:       strings.TrimSpace(payload.Domain),
-		enterpriseID: strings.TrimSpace(payload.EnterpriseID),
-	}, nil
-}
-
-// doLoginRequest 发起一次登录相关请求并解开信封。
-func doLoginRequest(req *http.Request) (json.RawMessage, error) {
-	client := httpx.Client(req.Context(), loginHTTPTimeout)
-	resp, errDo := client.Do(req)
-	if errDo != nil {
-		return nil, fmt.Errorf("login request: %w", errDo)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, errRead := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if errRead != nil {
-		return nil, fmt.Errorf("read login response: %w", errRead)
-	}
-	if resp.StatusCode >= 400 {
-		return nil, workbuddy.Classify(resp.StatusCode, string(body))
-	}
-	var envelope struct {
-		Code int             `json:"code"`
-		Msg  string          `json:"msg"`
-		Data json.RawMessage `json:"data"`
-	}
-	if errUnmarshal := json.Unmarshal(body, &envelope); errUnmarshal != nil {
-		// 部分登录接口直接返回裸对象（没有信封）。
-		return body, nil
-	}
-	if envelope.Code != 0 {
-		// 关键：**不能**把所有非 0 业务码都当成失败。
-		// 上游用 11217 + "login ing..." 表示「授权尚未完成」，这是轮询期间的
-		// 正常状态；当成失败会让用户看到"授权失败"而实际上只差一步。
-		return nil, &workbuddy.Error{
-			Kind:   workbuddy.KindClient,
-			Status: resp.StatusCode,
-			Msg:    fmt.Sprintf("%s %s", strconv.Itoa(envelope.Code), strings.TrimSpace(envelope.Msg)),
-		}
-	}
-	if len(envelope.Data) > 0 && string(envelope.Data) != "null" {
-		return envelope.Data, nil
-	}
-	return body, nil
-}
-
-// applyLoginHeaders 写入登录链路的请求头。
-// applyLoginHeaders 写入设备授权链路的请求头（与上游客户端一致）。
-//
-// X-Requested-With 与 Accept 的形态要和官方客户端一致：上游对设备授权
-// 端点做 UA/头校验，缺 X-Requested-With 时行为不确定。
-func applyLoginHeaders(req *http.Request, region workbuddy.Region) {
-	endpoints := workbuddy.GetEndpoints(region)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json, text/plain, */*")
-	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("Origin", endpoints.Origin)
-	req.Header.Set("Referer", endpoints.Origin+"/")
-	req.Header.Set("User-Agent", loginClientUA)
-	req.Header.Set("X-CodeBuddy-Request", "1")
-}
-
-// isLoginPending 判断错误是否表示「用户尚未完成授权」。
-//
-// 上游在待授权期间返回 404 或业务错误，这两种都不该终止轮询。
-func isLoginPending(err error) bool {
-	if err == nil {
-		return false
-	}
-	var upstreamErr *workbuddy.Error
-	if !errors.As(err, &upstreamErr) {
-		return false
-	}
-	if upstreamErr.Status == http.StatusNotFound {
-		return true
-	}
-	message := strings.ToLower(upstreamErr.Msg)
-	// 11217 是上游「登录进行中」的业务码；"login ing" 是它的固定文案。
-	// 二者都表示用户还没在浏览器里完成授权，应继续轮询而不是报失败。
-	if strings.Contains(message, loginPendingCode) {
-		return true
-	}
-	for _, marker := range []string{"login ing", "pending", "not authorized", "waiting", "authorizing"} {
-		if strings.Contains(message, marker) {
-			return true
-		}
-	}
-	return false
-}
-
-// loginPendingCode 是上游「授权尚未完成」的业务码。
-const loginPendingCode = "11217"
-
-// loginFileName 生成凭证文件名。
-//
-// 文件名以 workbuddy 开头是必要的：auth.parse 的文件名启发式与
-// 后续的凭证归属判定都依赖它。
-func loginFileName(credential *workbuddy.Credential) string {
-	uid := strings.TrimSpace(credential.UID)
-	if uid == "" {
-		uid = newLoginSessionID()
-	}
-	return "workbuddy-" + sanitizeFileComponent(uid) + ".json"
-}
-
-// sanitizeFileComponent 把可能含路径分隔符的标识清成安全的文件名片段。
-//
-// 上游的 uid 理论上受控，但落盘路径绝不能依赖上游数据的"善意"——
-// 一个带 ../ 的 uid 就能写到目录之外。
-func sanitizeFileComponent(raw string) string {
-	var builder strings.Builder
-	for _, char := range raw {
-		switch {
-		case char >= 'a' && char <= 'z', char >= 'A' && char <= 'Z', char >= '0' && char <= '9':
-			builder.WriteRune(char)
-		case char == '-' || char == '_':
-			builder.WriteRune(char)
-		}
-	}
-	out := builder.String()
-	if out == "" {
-		return newLoginSessionID()
-	}
-	if len(out) > 64 {
-		out = out[:64]
-	}
-	return out
-}
-
-// defaultDomainFor 返回某域的默认域名。
-func defaultDomainFor(region workbuddy.Region) string {
-	if region.IsGlobal() {
-		return "www.workbuddy.ai"
-	}
-	return "www.codebuddy.cn"
-}
-
 // newLoginSessionID 生成一个随机的登录会话标识。
+//
+// 登录会话是供应商各自持有的，但「随机会话 id」是所有登录链路的公共
+// 基础设施——一个 32 位十六进制随机串，与官方客户端的 messageId 同形。
+// 放在根层而不是某个供应商包里：Cline / WorkBuddy / Qoder 都用到它，
+// 塞进任一家都会让其它家反向依赖那一家。
 func newLoginSessionID() string {
-	return workbuddy.NewHexID()
+	return newHexID(16)
 }
 
-// gcLoginSessionsLocked 清理过期的登录会话。调用方必须持有 loginStoreMu。
-func gcLoginSessionsLocked() {
-	// 全量扫描很便宜（会话数是个位数），但没必要每次启动都扫。
-	if time.Since(loginStoreLastGC) < time.Minute {
-		return
+// newHexID 生成 n 字节的随机十六进制串（2n 个字符）。
+//
+// 随机源不可用时退回基于时间与计数的确定性串：登录会话 id 只影响
+// 会话查找的唯一性，退化的熵在这种场景下可接受——比返回空串让整个
+// 登录链路崩掉好。
+func newHexID(n int) string {
+	buf := make([]byte, n)
+	if _, errRand := rand.Read(buf); errRand != nil {
+		return fmt.Sprintf("fallback-%d-%d", time.Now().UnixNano(), atomic.AddInt64(&hexIDCounter, 1))
 	}
-	loginStoreLastGC = time.Now()
-	for id, session := range loginStore {
-		if time.Since(session.createdAt) > loginSessionTTL {
-			delete(loginStore, id)
-		}
-	}
+	return hex.EncodeToString(buf)
 }
+
+var hexIDCounter int64

@@ -269,6 +269,7 @@ func TestModelsForAuthIsolatesRealms(t *testing.T) {
 func TestStaticModelsBareAndMerged(t *testing.T) {
 	host := installFakeHost(t)
 	setupTestPlugin(t)
+	host.addAccount("1", "workbuddycn-test.json", sampleCredentialJSON("cn", "test"))
 	host.setUpstream(func(method, url, body string) fakeUpstreamResponse {
 		if strings.Contains(url, "/v3/config") {
 			return fakeUpstreamResponse{
@@ -306,6 +307,14 @@ func TestStaticModelsBareAndMerged(t *testing.T) {
 	}
 	if glmModel.Thinking == nil || len(glmModel.Thinking.Levels) == 0 {
 		t.Fatal("glm-5.2 must expose reasoning levels")
+	}
+
+	// 未添加凭证的供应商（如 opencodezen / cline / qoderglobal）的模型不应出现在模型清单中。
+	for _, m := range response.Models {
+		if strings.Contains(strings.ToLower(m.ID), "cline-free") ||
+			strings.Contains(strings.ToLower(m.ID), "qmodel") {
+			t.Fatalf("model %q from unconfigured vendor must not be present in static models", m.ID)
+		}
 	}
 }
 

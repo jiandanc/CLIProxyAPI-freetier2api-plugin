@@ -6,11 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"freetier2api-plugin/cpasdk/pluginabi"
 	"freetier2api-plugin/cpasdk/pluginapi"
+	"freetier2api-plugin/internal/core"
+	"freetier2api-plugin/internal/logger"
 )
 
 // hostAuthEntry 是宿主凭证列表里的一条。
@@ -106,9 +109,6 @@ func mergeAuthsAndFiles(auths, files []hostAuthEntry) []hostAuthEntry {
 	return out
 }
 
-// filenameHint 是凭证文件名的归属提示（与 workbuddy.RegisterPathHint 一致）。
-const filenameHint = "workbuddy"
-
 // filterPluginAuths 只保留属于本插件的凭证，并对重复条目（如同时出现在 Auths 与 Files 中）进行去重合并。
 //
 // 判据有两层，命中任一即收下：
@@ -182,17 +182,40 @@ func mergeHostAuthEntry(target *hostAuthEntry, source hostAuthEntry) {
 }
 
 // fileNameBelongsToPlugin 判断文件名是否符合本插件的命名约定。
+//
+// 判据来自供应商注册表而不是硬编码前缀：每个供应商实例的 ID 就是它
+// 的凭证文件名前缀（workbuddycn / qoderglobal / cline / opencodezen）。
+// 新增供应商时它自动生效，不需要在这里同步一份名单。
+//
+// 兼容旧前缀 workbuddy：历史凭证文件是 workbuddy-<uid>.json，当时还没有
+// cn/global 之分。
 func fileNameBelongsToPlugin(name string) bool {
 	base := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), ".json"))
 	if base == "" {
 		return false
 	}
-	if base == filenameHint {
+	if base == "workbuddy" {
 		return true
 	}
+	for _, vendor := range core.Vendors() {
+		id := strings.ToLower(strings.TrimSpace(vendor.ID()))
+		if id == "" {
+			continue
+		}
+		if base == id {
+			return true
+		}
+		for _, separator := range []string{"-", "_", "."} {
+			if strings.HasPrefix(base, id+separator) ||
+				strings.Contains(base, separator+id) {
+				return true
+			}
+		}
+	}
+	// 旧前缀 workbuddy（未分区时代）：workbuddy-<uid>.json 与 my-workbuddy.json。
 	for _, separator := range []string{"-", "_", "."} {
-		if strings.HasPrefix(base, filenameHint+separator) ||
-			strings.Contains(base, separator+filenameHint) {
+		if strings.HasPrefix(base, "workbuddy"+separator) ||
+			strings.Contains(base, separator+"workbuddy") {
 			return true
 		}
 	}
@@ -253,4 +276,38 @@ func getAuthJSONAndPathByIndex(ctx context.Context, callbackID, authIndex string
 func getAuthJSONByIndex(ctx context.Context, callbackID, authIndex string) ([]byte, bool) {
 	raw, _, ok := getAuthJSONAndPathByIndex(ctx, callbackID, authIndex)
 	return raw, ok
+}
+
+// activeVendorSet 返回当前拥有至少一个可用凭证的供应商 ID 集合。
+//
+// 用于模型列表过滤：如果某个供应商未添加 auth/key，模型列表既不去上游获取，
+// 也不在列表里展示该供应商的模型。
+func activeVendorSet(ctx context.Context, callbackID string) map[string]bool {
+	entries, errList := listHostAuths(ctx, callbackID)
+	if errList != nil {
+		logger.Debug("activeVendorSet: list host auths failed: %v", errList)
+		return map[string]bool{}
+	}
+	active := make(map[string]bool)
+	for _, entry := range entries {
+		if entry.Disabled || entry.Unavailable {
+			continue
+		}
+		raw, _, okRaw := getAuthJSONAndPathByIndex(ctx, callbackID, entry.AuthIndex)
+		if !okRaw && entry.Path != "" {
+			if r, err := os.ReadFile(entry.Path); err == nil && len(r) > 0 {
+				raw = r
+				okRaw = true
+			}
+		}
+		if !okRaw || len(raw) == 0 {
+			continue
+		}
+		if credential, okParse := parseVendorCredential(raw, entry.Name, nil); okParse {
+			if id := credential.VendorIDValue(); id != "" {
+				active[id] = true
+			}
+		}
+	}
+	return active
 }

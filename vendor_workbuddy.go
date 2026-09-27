@@ -314,17 +314,21 @@ func (v *workbuddyVendor) Checkin(ctx context.Context, cred *core.Credential) (*
 
 // LoginStart 发起一次设备授权登录。
 func (v *workbuddyVendor) LoginStart(ctx context.Context, meta map[string]any) (*pluginapi.AuthLoginStartResponse, error) {
-	state, authURL, errStart := requestLoginState(ctx, v.region)
+	state, authURL, errStart := workbuddy.RequestLoginState(ctx, v.region)
 	if errStart != nil {
 		return nil, errStart
 	}
 	sessionID := newLoginSessionID()
-	storeLoginSession(sessionID, &pendingLogin{region: v.region, state: state, createdAt: time.Now()})
+	workbuddy.StoreLoginSession(sessionID, &workbuddy.PendingLogin{
+		Region:    v.region,
+		State:     state,
+		CreatedAt: time.Now(),
+	})
 	return &pluginapi.AuthLoginStartResponse{
 		Provider:  providerKey,
 		URL:       authURL,
 		State:     sessionID,
-		ExpiresAt: time.Now().Add(loginSessionTTL),
+		ExpiresAt: time.Now().Add(workbuddy.LoginSessionTTL),
 		Metadata: map[string]any{
 			core.VendorKey: v.ID(),
 			"region":       string(v.region),
@@ -334,22 +338,22 @@ func (v *workbuddyVendor) LoginStart(ctx context.Context, meta map[string]any) (
 
 // LoginPoll 轮询一次登录状态。
 func (v *workbuddyVendor) LoginPoll(ctx context.Context, state string) (*pluginapi.AuthLoginPollResponse, error) {
-	session, okSession := takeLoginSession(state)
+	session, okSession := workbuddy.TakeLoginSession(state)
 	if !okSession {
 		return &pluginapi.AuthLoginPollResponse{
 			Status:  pluginapi.AuthLoginStatusError,
 			Message: "登录会话不存在或已过期，请重新发起登录",
 		}, nil
 	}
-	accessToken, refreshToken, errToken := exchangeLoginToken(ctx, session.region, session.state)
+	accessToken, refreshToken, errToken := workbuddy.ExchangeLoginToken(ctx, session.Region, session.State)
 	if errToken != nil {
-		if isLoginPending(errToken) {
+		if workbuddy.IsLoginPending(errToken) {
 			// 用户还没在浏览器里完成授权，继续等待。
 			return &pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusPending}, nil
 		}
 		return &pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusError, Message: errToken.Error()}, nil
 	}
-	account, errAccount := fetchLoginAccount(ctx, session.region, session.state, accessToken)
+	account, errAccount := workbuddy.FetchLoginAccount(ctx, session.Region, session.State, accessToken)
 	if errAccount != nil {
 		// token 已拿到但账号信息失败：用最小信息落盘，让用户至少能用起来
 		// （账号信息会在后续刷新时补齐）。
@@ -358,14 +362,14 @@ func (v *workbuddyVendor) LoginPoll(ctx context.Context, state string) (*plugina
 	credential := &workbuddy.Credential{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		UID:          account.uid,
-		Nickname:     account.nickname,
-		Domain:       account.domain,
-		EnterpriseID: account.enterpriseID,
+		UID:          account.UID,
+		Nickname:     account.Nickname,
+		Domain:       account.Domain,
+		EnterpriseID: account.EnterpriseID,
 	}
-	credential.SetRealm(session.region)
+	credential.SetRealm(session.Region)
 	if credential.Domain == "" {
-		credential.Domain = defaultDomainFor(credential.Realm())
+		credential.Domain = workbuddy.DefaultDomainFor(credential.Realm())
 	}
 	storageJSON, errStorage := credential.StorageJSON()
 	if errStorage != nil {
@@ -407,6 +411,18 @@ func (v *workbuddyVendor) Refresh(ctx context.Context, cred *core.Credential) (*
 		cred.ApplyTokenRefresh(native.AccessTokenValue(), native.RefreshTokenValue(), native.ExpiresAt)
 	}
 	return cred, refreshed, nil
+}
+
+// MergeStorageJSON 实现 core.StorageMerger：把刷新后的令牌合并回原凭证 JSON。
+//
+// WorkBuddy 的凭证是嵌套的 auth/account 结构，通用合并会把顶层字段写乱，
+// 因此必须由本供应商自己做。
+func (v *workbuddyVendor) MergeStorageJSON(original []byte, credential *core.Credential) ([]byte, error) {
+	native, errNative := v.nativeCredential(credential)
+	if errNative != nil {
+		return original, errNative
+	}
+	return workbuddy.MergeStorageJSON(original, native)
 }
 
 // Tasks 返回本区域支持的任务动作。任务闭环是 CodeBuddy 国内版的活动。

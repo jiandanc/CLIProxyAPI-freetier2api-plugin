@@ -133,6 +133,17 @@ progress { width: 160px; height: 8px; }
         <div class="hint" id="loginStatus">等待授权…</div>
       </div>
 
+      <div class="card" id="apiKeyBox" hidden>
+        <h2 id="apiKeyTitle">添加 API Key 账号</h2>
+        <div class="row" style="margin-bottom:8px">
+          <input type="password" id="inputApiKey" placeholder="输入 API Key（必填）" style="flex:2;min-width:280px">
+          <input type="text" id="inputApiLabel" placeholder="备注名称（可选）" style="flex:1;min-width:140px">
+          <button class="act primary" id="btnSubmitApiKey">保存账号</button>
+          <button class="act" id="btnCancelApiKey">取消</button>
+        </div>
+        <div class="hint" id="apiKeyHint">请输入从官网获取的 API Key，保存后自动在 auth 目录创建凭证。</div>
+      </div>
+
       <div id="accounts"></div>
     </div>
   </section>
@@ -429,7 +440,7 @@ progress { width: 160px; height: 8px; }
         item.textContent = vendor.name;
         item.addEventListener("click", function () {
           closeVendorMenu();
-          startLogin(vendor.id);
+          startVendorAdd(vendor);
         });
         menu.appendChild(item);
       });
@@ -473,6 +484,29 @@ progress { width: 160px; height: 8px; }
   var lastStatus = null;
   var quotaByAuth = {};
 
+  // maskAccount 对 API key 类账号做脱敏：保留前四位与后四位，中间用 *** 代替。
+  //
+  // 为什么只对 apikey 类脱敏：OAuth / 设备令牌账号展示的是昵称或邮箱（本就不
+  // 敏感），而 API key 本身就是凭证——页面是明文 HTML，把完整 key 渲染进去
+  // 等于把它写进浏览器缓存、截图和录屏里。太短的 key（≤8 位）全遮，因为
+  // 露出前后四位等于露出全部。
+  function maskAccount(value) {
+    var text = String(value === undefined || value === null ? "" : value);
+    if (text.length <= 8) return text ? "***" : "";
+    return text.slice(0, 4) + "***" + text.slice(-4);
+  }
+
+  // accountDisplay 决定一个账号在表里显示什么。
+  //
+  // API key 类账号的 label 就是 key 本身（添加时用户没给昵称），必须脱敏；
+  // 其余账号显示昵称/邮箱。
+  function accountDisplay(account) {
+    var vendor = vendorsById[account.vendor_id];
+    if (vendor && vendor.auth_mode === "apikey") {
+      return maskAccount(account.label || account.auth_id || "");
+    }
+    return account.label || account.auth_id || "-";
+  }
   function renderAccounts(status) {
     var host = document.getElementById("accounts");
     host.textContent = "";
@@ -499,7 +533,7 @@ progress { width: 160px; height: 8px; }
 
     var table = el("table");
     var head = el("tr");
-    ["供应商", "账号", "状态", "签到", "剩余 / 总额", "使用率", "刷新时间"]
+    ["供应商", "账号", "状态", "签到", "剩余 / 总额", "使用率", "刷新时间", "操作"]
       .forEach(function (name) { head.appendChild(el("th", name)); });
     table.appendChild(head);
 
@@ -510,7 +544,7 @@ progress { width: 160px; height: 8px; }
       vendorCell.appendChild(pill(vendor, ""));
       row.appendChild(vendorCell);
 
-      row.appendChild(el("td", account.label || account.auth_id || "-"));
+      row.appendChild(el("td", accountDisplay(account)));
       row.appendChild(cellWith(account.disabled ? pill("已禁用", "err") : pill("正常", "ok")));
 
       // 签到列：国际版没有签到体系（原项目的 D4 门控：global 无签到/成长任务，
@@ -555,6 +589,16 @@ progress { width: 160px; height: 8px; }
       var rt = account.refreshed_at ? new Date(account.refreshed_at).toLocaleString() : "-";
       row.appendChild(el("td", rt, "muted"));
 
+      // 操作列
+      var actionCell = el("td");
+      var deleteBtn = el("button", "删除", "act danger");
+      deleteBtn.type = "button";
+      deleteBtn.addEventListener("click", function () {
+        deleteAccount(account, deleteBtn);
+      });
+      actionCell.appendChild(deleteBtn);
+      row.appendChild(actionCell);
+
       table.appendChild(row);
     });
     host.appendChild(table);
@@ -586,6 +630,38 @@ progress { width: 160px; height: 8px; }
       document.getElementById("scheduleInfo").textContent =
         "下次执行：" + (scheduler.next_at || "-") + " · 任务：" + ((scheduler.next_tasks || []).join(", ") || "无");
     }).catch(function (err) { banner("err", err.message); throw err; });
+  }
+
+  // deleteAccount 删除一个账号（带确认）。
+  //
+  // 删除的是凭证文件：宿主用 fsnotify 监听 auth 目录，删掉文件后会自动
+  // 注销该账号，不需要额外通知。删除不可恢复，必须让用户确认一次；
+  // 按钮状态用全局标志记下「已确认」，避免误点。
+  var deleteArmed = false;
+
+  function deleteAccount(account, btn) {
+    var displayName = accountDisplay(account);
+    if (!deleteArmed) {
+      deleteArmed = true;
+      banner("warn", "再次点击「删除」确认删除账号「" + displayName + "」（不可恢复）");
+      btn.textContent = "确认删除";
+      setTimeout(function () {
+        deleteArmed = false;
+        btn.textContent = "删除";
+      }, 5000);
+      return;
+    }
+    deleteArmed = false;
+    btn.textContent = "删除";
+    api("POST", "/accounts/delete", { account_ids: [account.auth_id || account.auth_index] })
+      .then(function (data) {
+        if (!data) return;
+        var result = (data.results || []).filter(function (r) { return r.auth_id === account.auth_id || r.auth_id === account.auth_index; })[0];
+        banner(result && result.ok ? "ok" : "err", result ? (result.message || "已删除") : (data.error || "删除失败"));
+        // 删除后立即重新拉状态，让该账号从列表消失。
+        loadStatus(true).catch(function () { });
+      })
+      .catch(function (err) { banner("err", err.message); });
   }
 
   // ---- 额度 ----
@@ -897,6 +973,36 @@ progress { width: 160px; height: 8px; }
     if (loginTimer) { clearInterval(loginTimer); loginTimer = null; }
   }
 
+  var currentApiKeyVendor = null;
+
+  // startVendorAdd 根据供应商能力决定「添加账号」的动作。
+  //
+  // 支持登录的供应商（Cline / WorkBuddy / Qoder）→ 发起设备授权；
+  // 纯 API key 的供应商（OpenCode ZEN）→ 展开 API Key 输入框，保存后直写凭证文件。
+  function startVendorAdd(vendor) {
+    var loginBox = document.getElementById("loginBox");
+    var apiKeyBox = document.getElementById("apiKeyBox");
+    stopLoginPolling();
+
+    if (vendor.supports_login !== false && vendor.auth_mode !== "apikey") {
+      if (apiKeyBox) apiKeyBox.hidden = true;
+      startLogin(vendor.id);
+      return;
+    }
+
+    // API Key 型供应商：直接在页面展示输入框添加
+    if (loginBox) loginBox.hidden = true;
+    currentApiKeyVendor = vendor;
+    if (apiKeyBox) {
+      apiKeyBox.hidden = false;
+      document.getElementById("apiKeyTitle").textContent = "添加 " + vendor.name + " 账号";
+      document.getElementById("apiKeyHint").textContent = "请输入从官网申请的 API Key，保存后插件将自动在 auth 目录创建凭证文件。";
+      document.getElementById("inputApiKey").value = "";
+      document.getElementById("inputApiLabel").value = "";
+      document.getElementById("inputApiKey").focus();
+    }
+  }
+
   function startLogin(vendorID) {
     stopLoginPolling();
     var box = document.getElementById("loginBox");
@@ -979,6 +1085,44 @@ progress { width: 160px; height: 8px; }
     } catch (e) {
       document.getElementById("loginStatus").textContent = "复制失败，请手动选中复制。";
     }
+  });
+
+  document.getElementById("btnCancelApiKey").addEventListener("click", function () {
+    document.getElementById("apiKeyBox").hidden = true;
+    currentApiKeyVendor = null;
+  });
+
+  document.getElementById("btnSubmitApiKey").addEventListener("click", function () {
+    if (!currentApiKeyVendor) return;
+    var apiKey = (document.getElementById("inputApiKey").value || "").trim();
+    var label = (document.getElementById("inputApiLabel").value || "").trim();
+    if (!apiKey) {
+      banner("err", "API Key 不能为空");
+      return;
+    }
+    var btn = document.getElementById("btnSubmitApiKey");
+    btn.disabled = true;
+    btn.textContent = "保存中…";
+    api("POST", "/accounts/add", {
+      vendor: currentApiKeyVendor.id,
+      api_key: apiKey,
+      label: label
+    }).then(function (res) {
+      btn.disabled = false;
+      btn.textContent = "保存账号";
+      if (!res || !res.ok) {
+        banner("err", (res && res.error) || "保存失败");
+        return;
+      }
+      banner("ok", res.message || "账号添加成功");
+      document.getElementById("apiKeyBox").hidden = true;
+      currentApiKeyVendor = null;
+      loadStatus(true).catch(function () { });
+    }).catch(function (err) {
+      btn.disabled = false;
+      btn.textContent = "保存账号";
+      banner("err", err.message || "保存失败");
+    });
   });
 
   // 主「刷新」按钮执行 Token 续期保活，完成后刷新页面状态以展示最新文件修改时间。

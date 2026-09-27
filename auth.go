@@ -249,7 +249,7 @@ func handleAuthRefresh(request []byte) ([]byte, error) {
 	// 用户无法从文件时间判断账号是否真的续期过。
 	storage := rpc.StorageJSON
 	if refreshed {
-		if merged, errStorage := mergeVendorStorage(rpc.StorageJSON, updated, vendor.ID()); errStorage == nil {
+		if merged, errStorage := mergeVendorStorage(rpc.StorageJSON, updated, vendor); errStorage == nil {
 			storage = merged
 		}
 	}
@@ -266,20 +266,22 @@ func handleAuthRefresh(request []byte) ([]byte, error) {
 
 // mergeVendorStorage 把刷新后的凭证合并回原始 StorageJSON。
 //
-// 用供应商自己的合并逻辑（经 Native 取回协议层凭证）：各家的 JSON 结构不同
-// （WorkBuddy 是嵌套的 auth/account），通用合并会把顶层字段写乱。
+// 合并逻辑**交给供应商自己**（经 core.StorageMerger 可选接口）：各家的 JSON
+// 结构不同（WorkBuddy 是嵌套的 auth/account，Qoder 是扁平字段，Cline 是平铺的
+// accessToken/refreshToken），通用合并会把顶层字段写乱。
+//
+// 供应商没实现该接口时原样返回：宁可不动，也不要用错误的结构覆盖用户文件。
 // 合并后补 vendor 字段，保证供应商归属始终可判定。
-func mergeVendorStorage(original []byte, credential *core.Credential, vendorID string) ([]byte, error) {
-	native, okNative := credential.Native.(*workbuddy.Credential)
-	if !okNative {
-		// 没有协议层凭证时退回原样：宁可不动，也不要用错误的结构覆盖用户文件。
+func mergeVendorStorage(original []byte, credential *core.Credential, vendor core.Vendor) ([]byte, error) {
+	merger, okMerger := vendor.(core.StorageMerger)
+	if !okMerger {
 		return original, nil
 	}
-	merged, errMerge := workbuddy.MergeStorageJSON(original, native)
+	merged, errMerge := merger.MergeStorageJSON(original, credential)
 	if errMerge != nil {
 		return nil, errMerge
 	}
-	return ensureVendorField(merged, vendorID)
+	return ensureVendorField(merged, vendor.ID())
 }
 
 // refreshedAuthData 在刷新后重建凭证记录，保留宿主侧的既有字段。

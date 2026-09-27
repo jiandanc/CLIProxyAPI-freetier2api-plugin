@@ -20,6 +20,8 @@ import (
 	"freetier2api-plugin/internal/core"
 	"freetier2api-plugin/internal/httpx"
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/cline"
+	"freetier2api-plugin/internal/vendors/opencodezen"
 	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
@@ -102,11 +104,18 @@ func handleModelForAuth(request []byte) ([]byte, error) {
 }
 
 // staticModels 返回所有启用供应商的模型并集（裸模型名，同名合并去重）。
+//
+// 规则：未添加凭证（auth/key）的供应商既不去获取也不注册/展示其模型。
 func staticModels(ctx context.Context) ([]pluginapi.ModelInfo, error) {
 	var all []pluginapi.ModelInfo
 	var firstErr error
+	active := activeVendorSet(ctx, "")
 	for _, vendor := range core.Vendors() {
 		if !realmEnabled(loadedConfig(), vendor.Region()) {
+			continue
+		}
+		// 如果该供应商没有任何凭证/key，不要去获取也不要展示其模型
+		if !active[vendor.ID()] {
 			continue
 		}
 		models, errModels := vendor.StaticModels(ctx)
@@ -268,6 +277,31 @@ func defaultContextWindowFor(modelID string) int64 {
 	return workbuddy.DefaultContextWindowFor(modelID)
 }
 
+// defaultMaxOutputFor 返回模型的默认输出上限（上游没给时的兜底）。
+//
+// 取 16384：这是各家上游对主流模型的常见默认值，也是 qoder2api 与
+// workbuddy2api 各自的兜底清单里一致采用的值。取小了会平白限制用户，
+// 取大了会被上游按请求上限拒绝——16384 是两边都不出错的选择。
+func defaultMaxOutputFor(modelID string) int64 {
+	_ = modelID
+	return 16384
+}
+
+// baseURLOverride 读取某个供应商的上游基地址覆盖值。
+//
+// 上游换域名或用户要走自建网关时不必改代码重编译。
+func baseURLOverride(vendorID string) string {
+	cfg := loadedConfig()
+	switch vendorID {
+	case opencodezen.VendorID:
+		return cfg.ZenBaseURL
+	case cline.VendorID:
+		return cfg.ClineBaseURL
+	default:
+		return ""
+	}
+}
+
 // applyModelCatalog 在注册/重配置时预热模型缓存。
 //
 // 灌入上次的状态缓存能让 /v1/models 立刻有内容，不必等首次上游探测完成。
@@ -378,15 +412,20 @@ func persistModels() {
 // modelCatalogMu 串行化模型目录刷新，避免并发探测把上游打满。
 var modelCatalogMu sync.Mutex
 
-// refreshModelsFromUpstream 主动刷新所有启用供应商的模型清单（管理页调用）。
+// refreshModelsFromUpstream 主动刷新所有启用且已有凭证的供应商的模型清单（管理页调用）。
 func refreshModelsFromUpstream(ctx context.Context) (int, error) {
 	modelCatalogMu.Lock()
 	defer modelCatalogMu.Unlock()
 
 	total := 0
 	var firstErr error
+	active := activeVendorSet(ctx, "")
 	for _, vendor := range core.Vendors() {
 		if !realmEnabled(loadedConfig(), vendor.Region()) {
+			continue
+		}
+		// 未添加凭证的供应商不获取模型
+		if !active[vendor.ID()] {
 			continue
 		}
 		models, errModels := vendor.StaticModels(ctx)

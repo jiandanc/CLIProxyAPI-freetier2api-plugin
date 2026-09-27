@@ -25,6 +25,7 @@ import (
 	"freetier2api-plugin/internal/core"
 	"freetier2api-plugin/internal/httpx"
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/opencodezen"
 	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
@@ -43,6 +44,8 @@ func managementRegistration() pluginapi.ManagementRegistrationResponse {
 			{Method: "GET", Path: managementRoutePrefix + "/vendors", Description: "列出已启用的供应商（供添加账号下拉与分组展示）。"},
 			{Method: "POST", Path: managementRoutePrefix + "/checkin", Description: "对指定或全部账号执行签到。"},
 			{Method: "POST", Path: managementRoutePrefix + "/quotas", Description: "批量查询账号额度。"},
+			{Method: "POST", Path: managementRoutePrefix + "/accounts/delete", Description: "删除指定账号的凭证文件（宿主监听 auth 目录，会自动注销该账号）。"},
+			{Method: "POST", Path: managementRoutePrefix + "/accounts/add", Description: "添加 API Key 类账号。"},
 			{Method: "GET", Path: managementRoutePrefix + "/models", Description: "读取当前注册的模型清单。"},
 			{Method: "POST", Path: managementRoutePrefix + "/models/toggle", Description: "批量禁用/启用模型。"},
 			{Method: "POST", Path: managementRoutePrefix + "/models/refresh", Description: "从上游拉取模型清单并缓存。"},
@@ -102,6 +105,12 @@ func handleManagement(request []byte) ([]byte, error) {
 
 	case method == http.MethodPost && matchesManagementPath(rpc.Path, "/quotas"):
 		return okEnvelope(handleQuotasRequest(rpc))
+
+	case method == http.MethodPost && matchesManagementPath(rpc.Path, "/accounts/delete"):
+		return okEnvelope(handleAccountDeleteRequest(rpc))
+
+	case method == http.MethodPost && matchesManagementPath(rpc.Path, "/accounts/add"):
+		return okEnvelope(handleAccountAddRequest(rpc))
 
 	case method == http.MethodGet && matchesManagementPath(rpc.Path, "/models"):
 		return okEnvelope(handleModelsList(rpc))
@@ -286,23 +295,33 @@ type consoleModel struct {
 // 数据来自模型目录缓存（不触发上游请求），因此响应很快。
 // nolint: revive // req 保留是为了与其它管理处理器签名一致。
 func handleModelsList(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
+	ctx, cancel := managementContext(req)
+	defer cancel()
+	callbackID := hostCallbackID(req)
 	cfg := loadedConfig()
 	models := make([]consoleModel, 0, 128)
 
-	// 逐个供应商取模型。**不能只读 workbuddy 的缓存**——那会让 Qoder 的模型
-	// 在页面上完全看不到（它是另一个协议层的缓存）。
+	active := activeVendorSet(ctx, callbackID)
+
+	// 逐个供应商取模型。如果供应商没有添加 auth/key，不要展示该供应商的模型。
 	for _, vendor := range core.Vendors() {
 		if !realmEnabled(cfg, vendor.Region()) {
+			continue
+		}
+		if !active[vendor.ID()] {
 			continue
 		}
 		models = append(models, consoleModelsForVendor(vendor)...)
 	}
 
-	// 额外注册的模型（配置里的 extra_models）也一并展示。
+	// 额外注册的模型（配置里的 extra_models）也一并展示（前提是该供应商有凭证）。
 	for _, extra := range extraModels(cfg) {
 		vendorID, bare := core.SplitModelID(extra.ID)
 		if vendorID != "" {
 			if _, okVendor := core.VendorByID(vendorID); !okVendor {
+				continue
+			}
+			if !active[vendorID] {
 				continue
 			}
 		}
@@ -605,6 +624,226 @@ func queryInt64(query map[string][]string, key string, fallback int64) int64 {
 // handleCheckinRequest 对指定或全部账号执行签到。
 type accountBatchRequest struct {
 	AccountIDs []string `json:"account_ids"`
+}
+
+// accountDeleteRequest 是删除账号的请求体。
+type accountDeleteRequest struct {
+	AccountIDs []string `json:"account_ids"`
+}
+
+// handleAccountDeleteRequest 删除指定账号的凭证文件。
+//
+// **为什么是删文件而不是调宿主接口**：宿主在 ABI 里只暴露了 auth.list /
+// auth.get / auth.save，没有删除方法；插件在进程内也拿不到管理密钥，
+// 无法走宿主的 DELETE /v0/management/auth-files。
+//
+// 但宿主用 fsnotify 监听 auth 目录并处理 Remove/Rename
+// （internal/watcher/events.go 的 handleEvent → removeClientLocked），
+// 因此**删掉文件后宿主会自己注销该账号**——不需要额外通知。
+//
+// 安全约束：只删「宿主确认属于本插件的凭证文件」，且路径必须落在 auth 目录内。
+// 宿主给的 Path 理论上是可信的，但落盘路径绝不能依赖上游数据的"善意"，
+// 一次越界删除就可能是用户的任意文件。
+func handleAccountDeleteRequest(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
+	var body accountDeleteRequest
+	if len(req.Body) > 0 {
+		_ = json.Unmarshal(req.Body, &body)
+	}
+	if len(body.AccountIDs) == 0 {
+		return jsonResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": "account_ids 不能为空"})
+	}
+
+	ctx, cancel := managementContext(req)
+	defer cancel()
+	callbackID := hostCallbackID(req)
+
+	entries, errList := listHostAuths(ctx, callbackID)
+	if errList != nil {
+		return jsonResponse(http.StatusOK, map[string]any{
+			"ok": false, "error": "读取账号列表失败：" + errList.Error(),
+		})
+	}
+	wanted := make(map[string]bool, len(body.AccountIDs))
+	for _, target := range body.AccountIDs {
+		wanted[strings.TrimSpace(target)] = true
+	}
+
+	results := make([]accountActionResult, 0, len(body.AccountIDs))
+	deleted := 0
+	for _, entry := range entries {
+		if !wanted[entry.ID] && !wanted[entry.Name] && !wanted[entry.AuthIndex] {
+			continue
+		}
+		result := accountActionResult{
+			AuthID: firstNonEmptyString(entry.ID, entry.Name),
+			Label:  firstNonEmptyString(entry.Label, entry.Name, entry.ID),
+		}
+		if errDelete := deleteAuthFile(ctx, callbackID, entry); errDelete != nil {
+			result.OK = false
+			result.Message = errDelete.Error()
+			results = append(results, result)
+			continue
+		}
+		result.OK = true
+		result.Message = "已删除"
+		deleted++
+		results = append(results, result)
+	}
+	return jsonResponse(http.StatusOK, map[string]any{
+		"ok": true, "deleted": deleted, "results": results,
+	})
+}
+
+// deleteAuthFile 删除一个账号的凭证文件。
+func deleteAuthFile(ctx context.Context, callbackID string, entry hostAuthEntry) error {
+	// 先解析凭证，确认它确实归本插件——避免误删别家插件的凭证文件。
+	raw, filePath, okRaw := getAuthJSONAndPathByIndex(ctx, callbackID, entry.AuthIndex)
+	if !okRaw {
+		return fmt.Errorf("读取凭证失败，无法确认归属")
+	}
+	if _, okParse := parseVendorCredential(raw, entry.Name, nil); !okParse {
+		return fmt.Errorf("该凭证不属于本插件，拒绝删除")
+	}
+
+	targetPath := strings.TrimSpace(filePath)
+	if targetPath == "" {
+		targetPath = strings.TrimSpace(entry.Path)
+	}
+	if targetPath == "" {
+		// 运行时凭证（无物理文件）删不掉：如实告知，而不是假装成功。
+		return fmt.Errorf("该账号没有对应的凭证文件（运行时凭证），无法删除")
+	}
+	if errSafe := ensureAuthFilePathSafe(targetPath); errSafe != nil {
+		return errSafe
+	}
+	if errRemove := os.Remove(targetPath); errRemove != nil {
+		if os.IsNotExist(errRemove) {
+			return nil
+		}
+		return fmt.Errorf("删除文件失败：%w", errRemove)
+	}
+	logger.Info("deleted auth file %s (vendor=%s)", filepath.Base(targetPath), entry.Name)
+	return nil
+}
+
+// ensureAuthFilePathSafe 校验待删路径是一个 .json 凭证文件。
+//
+// 三重约束，任何一条不满足都拒绝：
+//  1. 必须是绝对路径（相对路径会相对于进程工作目录，落在哪儿不可控）；
+//  2. 扩展名必须是 .json（凭证文件都是 JSON，别的文件一律不碰）；
+//  3. 路径必须已存在且是普通文件（目录、符号链接一律拒绝——符号链接会让
+//     os.Remove 删掉链接本身，但更糟的是它可能指向 auth 目录之外）。
+func ensureAuthFilePathSafe(path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("拒绝删除非绝对路径：%s", path)
+	}
+	if !strings.HasSuffix(strings.ToLower(path), ".json") {
+		return fmt.Errorf("拒绝删除非凭证文件：%s", filepath.Base(path))
+	}
+	info, errStat := os.Lstat(path)
+	if errStat != nil {
+		if os.IsNotExist(errStat) {
+			return nil
+		}
+		return fmt.Errorf("检查文件失败：%w", errStat)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("拒绝删除符号链接：%s", filepath.Base(path))
+	}
+	if info.IsDir() {
+		return fmt.Errorf("拒绝删除目录：%s", filepath.Base(path))
+	}
+	return nil
+}
+
+// accountAddRequest 是添加 API Key 类账号的请求体。
+type accountAddRequest struct {
+	Vendor string `json:"vendor"`
+	APIKey string `json:"api_key"`
+	Label  string `json:"label"`
+}
+
+// handleAccountAddRequest 添加一个 API Key 凭证并落盘。
+func handleAccountAddRequest(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
+	var body accountAddRequest
+	if len(req.Body) > 0 {
+		_ = json.Unmarshal(req.Body, &body)
+	}
+	vendorID := strings.TrimSpace(body.Vendor)
+	apiKey := strings.TrimSpace(body.APIKey)
+	label := strings.TrimSpace(body.Label)
+
+	if vendorID == "" {
+		return jsonResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": "vendor 不能为空"})
+	}
+	if apiKey == "" {
+		return jsonResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": "api_key 不能为空"})
+	}
+	vendor, okVendor := core.VendorByID(vendorID)
+	if !okVendor {
+		return jsonResponse(http.StatusBadRequest, map[string]any{"ok": false, "error": fmt.Sprintf("未知供应商 %q", vendorID)})
+	}
+
+	payload := map[string]any{
+		"type":         providerKey,
+		core.VendorKey: vendor.ID(),
+		"api_key":      apiKey,
+	}
+	if label != "" {
+		payload["label"] = label
+	}
+
+	rawJSON, errMarshal := json.MarshalIndent(payload, "", "  ")
+	if errMarshal != nil {
+		return jsonResponse(http.StatusInternalServerError, map[string]any{"ok": false, "error": errMarshal.Error()})
+	}
+
+	seed := label
+	if seed == "" {
+		seed = opencodezen.MaskedKey(apiKey)
+	}
+	if seed == "" {
+		seed = newHexID(8)
+	}
+	fileName := core.FileNameFor(vendor.ID(), seed)
+
+	_, cancel := managementContext(req)
+	defer cancel()
+	callbackID := hostCallbackID(req)
+
+	saved := false
+	if _, errSave := callHostScoped(callbackID, pluginabi.MethodHostAuthSave, pluginapi.HostAuthSaveRequest{
+		Name: fileName,
+		JSON: rawJSON,
+	}); errSave == nil {
+		saved = true
+	} else {
+		logger.Debug("host.auth.save failed for %s: %v", fileName, errSave)
+	}
+
+	// 磁盘直写兜底
+	for _, dir := range []string{"/root/.cli-proxy-api", "."} {
+		dst := filepath.Join(dir, fileName)
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			if errWrite := os.WriteFile(dst, rawJSON, 0o600); errWrite == nil {
+				saved = true
+				break
+			}
+		}
+	}
+
+	if !saved {
+		return jsonResponse(http.StatusInternalServerError, map[string]any{
+			"ok": false, "error": "保存凭证文件失败",
+		})
+	}
+
+	logger.Info("added auth file %s for vendor %s", fileName, vendor.ID())
+	return jsonResponse(http.StatusOK, map[string]any{
+		"ok":      true,
+		"auth_id": fileName,
+		"message": "账号保存成功",
+	})
 }
 
 func handleCheckinRequest(req pluginapi.ManagementRequest) pluginapi.ManagementResponse {
@@ -1140,10 +1379,17 @@ type vendorDescriptor struct {
 	ID string `json:"id"`
 	// Name 是展示名（如「WorkBuddy 国内版」）。
 	Name string `json:"name"`
-	// Region 是区域标识（cn / global）。
+	// Region 是区域标识（cn / global；无区域供应商为空串）。
 	Region string `json:"region"`
 	// SupportsCheckin 报告该供应商是否提供签到（页面据此隐藏入口）。
 	SupportsCheckin bool `json:"supports_checkin"`
+	// AuthMode 是凭证形态（apikey / oauth）：页面据此决定账号列是否脱敏。
+	AuthMode string `json:"auth_mode"`
+	// SupportsLogin 报告该供应商是否提供登录流程。
+	//
+	// 页面据此决定「添加账号」下拉里该项是发起登录还是提示手填凭证——
+	// OpenCode ZEN 是纯 API key，点它发起登录只会拿到一个「不支持」错误。
+	SupportsLogin bool `json:"supports_login"`
 }
 
 // buildVendorsPayload 返回已启用的供应商清单。
@@ -1151,7 +1397,7 @@ type vendorDescriptor struct {
 // 页面据此渲染「添加账号」下拉与账号表分组，因此新增供应商不需要改 HTML。
 func buildVendorsPayload() map[string]any {
 	cfg := loadedConfig()
-	vendors := make([]vendorDescriptor, 0, 4)
+	vendors := make([]vendorDescriptor, 0, len(core.Vendors()))
 	for _, vendor := range core.Vendors() {
 		if !realmEnabled(cfg, vendor.Region()) {
 			continue
@@ -1161,9 +1407,32 @@ func buildVendorsPayload() map[string]any {
 			Name:            vendor.Name(),
 			Region:          vendor.Region(),
 			SupportsCheckin: vendor.SupportsCheckin(),
+			AuthMode:        vendorAuthMode(vendor),
+			SupportsLogin:   vendorSupportsLogin(vendor),
 		})
 	}
 	return map[string]any{"ok": true, "vendors": vendors}
+}
+
+// vendorAuthMode 返回供应商的凭证形态（未声明时按 oauth 处理）。
+func vendorAuthMode(vendor core.Vendor) string {
+	if reporter, okReporter := vendor.(core.AuthModeReporter); okReporter {
+		if mode := strings.TrimSpace(reporter.AuthMode()); mode != "" {
+			return mode
+		}
+	}
+	return "oauth"
+}
+
+// vendorSupportsLogin 报告供应商是否提供登录流程。
+//
+// 声明式：见 core.LoginSupport 的说明。未声明的按「支持」处理——
+// 绝大多数供应商都有登录，只有 API key 型（OpenCode ZEN）没有。
+func vendorSupportsLogin(vendor core.Vendor) bool {
+	if support, okSupport := vendor.(core.LoginSupport); okSupport {
+		return support.SupportsLogin()
+	}
+	return true
 }
 
 // registeredModelsForVendor 返回某个供应商当前注册给宿主的模型清单。
@@ -1235,24 +1504,20 @@ func saveRefreshedCredential(ctx context.Context, callbackID string, vendor core
 
 // refreshedStorageJSON 用供应商自己的合并逻辑更新凭证 JSON。
 //
-// 各家结构不同（WorkBuddy 是嵌套的 auth/account，Qoder 是扁平字段），
-// 通用合并会把顶层字段写乱。这里按供应商类型分派到对应的合并函数。
+// 各家结构不同（WorkBuddy 是嵌套的 auth/account，Qoder 与 Cline 是扁平字段），
+// 通用合并会把顶层字段写乱，因此合并交给供应商自己实现（core.StorageMerger）。
+//
+// 未实现该接口的供应商返回 ok=false，调用方据此跳过写盘——不写比写坏好。
 func refreshedStorageJSON(vendor core.Vendor, original []byte, updated *core.Credential) ([]byte, bool) {
-	switch vendor.ID() {
-	case workbuddy.VendorIDCN, workbuddy.VendorIDGlobal:
-		native, okNative := updated.Native.(*workbuddy.Credential)
-		if !okNative {
-			return original, false
-		}
-		merged, errMerge := workbuddy.MergeStorageJSON(original, native)
-		if errMerge != nil {
-			return original, false
-		}
-		return merged, true
-	default:
-		// 其它供应商目前没有独立的合并逻辑，保持原文件不变。
+	merger, okMerger := vendor.(core.StorageMerger)
+	if !okMerger {
 		return original, false
 	}
+	merged, errMerge := merger.MergeStorageJSON(original, updated)
+	if errMerge != nil {
+		return original, false
+	}
+	return merged, true
 }
 
 // normalizeQuotaNumbers 从归一的额度响应里折算「剩余 / 总额」两个数字。

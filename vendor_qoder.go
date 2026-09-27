@@ -13,6 +13,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -354,6 +355,42 @@ func (v *qoderVendor) Refresh(ctx context.Context, cred *core.Credential) (*core
 		cred.Native = updated
 	}
 	return cred, refreshed, nil
+}
+
+// MergeStorageJSON 实现 core.StorageMerger：把续期后的令牌合并回原凭证 JSON。
+//
+// Qoder 的凭证是扁平字段（device_token / refresh_token / region / label），
+// 只更新会变的那两个令牌字段，其余字段（用户手写的 label、secret 等）原样保留。
+func (v *qoderVendor) MergeStorageJSON(original []byte, credential *core.Credential) ([]byte, error) {
+	if len(original) == 0 {
+		return original, nil
+	}
+	var payload map[string]any
+	if errUnmarshal := json.Unmarshal(original, &payload); errUnmarshal != nil {
+		return original, nil
+	}
+	token := credential.TokenValue()
+	refreshToken := credential.RefreshTokenValue()
+	if token != "" {
+		// 只改已有的键名，不新增：用户可能用的是七个候选名之一
+		// （token / device_token / access_token …），凭空加一个
+		// device_token 会让文件里出现两份含义相同的令牌。
+		if _, okDevice := payload["device_token"]; okDevice {
+			payload["device_token"] = token
+		} else if _, okToken := payload["token"]; okToken {
+			payload["token"] = token
+		} else {
+			payload["device_token"] = token
+		}
+	}
+	if refreshToken != "" {
+		payload["refresh_token"] = refreshToken
+	}
+	merged, errMarshal := json.MarshalIndent(payload, "", "  ")
+	if errMarshal != nil {
+		return original, errMarshal
+	}
+	return merged, nil
 }
 
 // Tasks 返回本实例支持的任务动作。

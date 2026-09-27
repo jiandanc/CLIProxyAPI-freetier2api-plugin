@@ -68,6 +68,13 @@ type pluginConfig struct {
 	AutoCheckinAt string
 	// AutoTasks 开启成长任务的每日自动闭环（连登兑换 + 抽奖 + 旅行 + 夜猫子等）。
 	AutoTasks bool
+
+	// ZenBaseURL 覆盖 OpenCode ZEN 的上游基地址（留空用内置默认值）。
+	//
+	// 上游换域名或用户要走自建网关时不必改代码重编译。
+	ZenBaseURL string
+	// ClineBaseURL 覆盖 Cline 的上游基地址（留空用内置默认值）。
+	ClineBaseURL string
 }
 
 const (
@@ -179,6 +186,10 @@ func applyConfigLine(cfg *pluginConfig, key, value string) error {
 		cfg.EnabledRealms = realms
 	case "extra_models":
 		cfg.ExtraModels = splitList(stripInlineList(value))
+	case "zen_base_url":
+		cfg.ZenBaseURL = strings.TrimSpace(value)
+	case "cline_base_url":
+		cfg.ClineBaseURL = strings.TrimSpace(value)
 	case "state_dir":
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			cfg.StateDir = trimmed
@@ -281,8 +292,16 @@ func parseRealms(raw string) ([]string, error) {
 	return out, nil
 }
 
-// realmEnabled 报告某个域是否启用。
+// realmEnabled 判断某个区域是否被配置启用。
+//
+// **空区域一律视为启用**：区域是「同一协议的不同部署」（WorkBuddy 国内版 /
+// 国际版），只对这类供应商有意义。Cline / OpenCodeZEN 这类单一部署的供应商
+// 没有区域概念，Region() 返回空串——若也拿 enabled_realms 去卡，它们会因为
+// "cn,global" 里没有空串而被静默禁用，表现为「账号添加成功但模型列表为空」。
 func realmEnabled(cfg pluginConfig, realm string) bool {
+	if strings.TrimSpace(realm) == "" {
+		return true
+	}
 	for _, item := range cfg.EnabledRealms {
 		if item == realm {
 			return true

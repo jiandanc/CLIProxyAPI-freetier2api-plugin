@@ -85,7 +85,36 @@
 （分层结构、`cpasdk/` vendored 副本、C ABI 桥的写法、宿主回调的并发准入与关闭排空、
 控制台页复用管理密钥、出站 HTTP 双形态键名兼容）。
 
-## 5. 本插件的许可
+## 5. opencode2api（OpenCode ZEN 协议参考）
+
+- 仓库参考：https://github.com/anomalyco/opencode 衍生之 `opencode2api`
+- 作用：OpenCode ZEN 供应商实现参考
+
+本插件中参考 opencode2api 的部分：
+
+| 本插件路径 | 参考内容 | 说明 |
+| --- | --- | --- |
+| `internal/vendors/opencodezen/endpoints.go` | 上游基地址 `https://opencode.ai/zen` 与 User-Agent 规范、会话 ID 规范 | 伪装官方客户端与规范会话头 |
+| `internal/vendors/opencodezen/catalog.go` | 动态拉取 `/v1/models` 模型列表 | 动态模型目录探测 |
+| `internal/vendors/opencodezen/chat.go` | chat-completions 转发与请求头组装 | 纯 chat-completions 转发（裁剪非 chat 路径） |
+| `internal/vendors/opencodezen/credential.go` | API Key 鉴权与前缀识别 | 静态 API Key 解析与脱敏 |
+
+## 6. cline2api（Cline 登录与协议参考）
+
+- 仓库参考：`cline2api`
+- 作用：Cline 供应商实现参考
+
+本插件中参考 cline2api 的部分：
+
+| 本插件路径 | 参考内容 | 说明 |
+| --- | --- | --- |
+| `internal/vendors/cline/login.go` | WorkOS OAuth 2.0 设备授权码流程（RFC 8628） | 设备码申请、用户轮询授权、换取 Cline 令牌 |
+| `internal/vendors/cline/refresh.go` | `/auth/refresh` 令牌刷新与过期解析 | 驼峰 `grantType: refresh_token` 自动续期 |
+| `internal/vendors/cline/endpoints.go` | 上游基地址 `https://api.cline.bot/api/v1` 与官方客户端 UA / 请求头 | 完整复刻 Cline 客户端请求头 |
+| `internal/vendors/cline/catalog.go` | 免认证推荐模型目录 `recommended-models` 探测 | 分离 free 与 clinePass 计费档模型 |
+| `internal/vendors/cline/credential.go` | `workos:` 前缀注入与持久化管理 | 规范出站 Bearer 令牌与双格式兼容 |
+
+## 7. 本插件的许可
 
 **GPL-3.0**。WorkBuddy 部分源自 MIT 的 `workbuddy2api-panel`（可并入 GPL），
 Qoder 部分源自 **GPL-3.0** 的 `qoder2api` / QCCG，因此整体必须以 GPL-3.0 分发。

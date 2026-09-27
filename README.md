@@ -21,6 +21,8 @@
 | `workbuddyglobal` | WorkBuddy 国际版 | `workbuddyglobal-*.json` |
 | `qodercn` | Qoder 国内版 | `qodercn-*.json` |
 | `qoderglobal` | Qoder 国际版 | `qoderglobal-*.json` |
+| `opencodezen` | OpenCode ZEN | `opencodezen-*.json` |
+| `cline` | Cline | `cline-*.json` |
 
 ## 架构：按供应商插桩
 
@@ -34,14 +36,17 @@
 ```
 package main            ABI 适配层：把宿主 RPC 翻译成 Vendor 调用
   ├─ vendor_workbuddy.go   WorkBuddy 的 core.Vendor 实现（两个区域实例）
-  └─ vendor_qoder.go       Qoder 的 core.Vendor 实现（两个区域实例）
+  ├─ vendor_qoder.go       Qoder 的 core.Vendor 实现（两个区域实例）
+  ├─ vendor_opencodezen.go OpenCode ZEN 的 core.Vendor 实现
+  └─ vendor_cline.go       Cline 的 core.Vendor 实现
 
 internal/core           供应商无关的骨架：Vendor 接口、供应商注册表、
                         共享 Credential、模型 ID 协议、信封、错误
 
-internal/vendors/<name> 纯协议层：端点表、请求头、指纹、SSE、额度、签到、
-                        登录、任务闭环。不知道宿存在，出站 HTTP 一律经
-                        internal/httpx 走宿主桥。
+internal/vendors/<name> 纯协议层：各供应商目录结构严格对齐（catalog.go、
+                        chat.go、checkin.go、credential.go、endpoints.go、
+                        errors.go、login.go、quota.go、refresh.go）。
+                        出站 HTTP 一律经 internal/httpx 走宿主桥。
 ```
 
 新增一个供应商只需实现 `core.Vendor` 并在 `init` 里注册，**不必改 ABI 适配层的
@@ -75,6 +80,7 @@ internal/vendors/<name> 纯协议层：端点表、请求头、指纹、SSE、�
   Qoder 国内版支持每日签到。
 - **提示词防御与脱敏**（WorkBuddy）：系统提示词三模式（透传 / 替换 / 追加）
   + 出站请求体指纹脱敏，两层叠加降低上游内容审核拦截率。
+- **敏感凭证脱敏与操作管理**：API key 类型账号在列表展示前4位与后4位、中间脱敏为 `***`，避免明文泄露；账号概览最后一列提供「操作」列，支持「删除」按钮直接删除本地凭证文件（带二次确认），宿主基于文件监听自动注销失效账号。
 - **零第三方依赖**：`go.mod` 只有 module 与 go 版本两行，构建不需要拉包。
 
 ## 构建
@@ -192,6 +198,44 @@ plugins:
 | `region` | 建议 | `cn` / `global`；缺失时按配置兜底（默认 global） |
 | `secret` | 否 | qoder2api 导出格式：整对凭证放在这个 JSON 字符串里 |
 
+### OpenCode ZEN 凭证字段
+
+OpenCode ZEN 无登录流程，直接用官网申请的 API key 即可：
+
+```json
+{
+  "type": "freetier",
+  "vendor": "opencodezen",
+  "api_key": "sk-...",
+  "label": "我的 ZEN Key"
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `api_key` | 是 | API Key（`apikey` / `zen_key` 亦兼容） |
+| `label` | 否 | 展示名（缺失时自动脱敏显示为 `前4位***后4位`） |
+
+### Cline 凭证字段
+
+通过控制台页的「添加账号 ▾」->「Cline」完成 WorkOS 设备码授权自动落盘，亦可手动填入：
+
+```json
+{
+  "type": "freetier",
+  "vendor": "cline",
+  "refreshToken": "...",
+  "accessToken": "...",
+  "email": "user@example.com"
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `refreshToken` | 是 | 长期凭据（WorkOS 设备授权产物，续期核心） |
+| `accessToken` | 否 | 出站令牌（缺失时插件首次刷新会自动用 refreshToken 换取） |
+| `email` | 建议 | 账号展示邮箱 |
+
 ## 客户端接入
 
 ```bash
@@ -227,6 +271,8 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 | `machine_salt` | string | 自动生成 | 设备指纹盐；从旧插件迁移时填原值可保持指纹不变 |
 | `auto_checkin` / `auto_checkin_at` | bool / string | **`true`** / `10:00` | 每日自动任务（默认开启） |
 | `auto_tasks` | bool | **`true`** | 每日自动跑任务闭环（连登兑换、抽奖、旅行、夜猫子等） |
+| `zen_base_url` | string | 空 | 覆盖 OpenCode ZEN 上游基地址（默认 `https://opencode.ai/zen`） |
+| `cline_base_url` | string | 空 | 覆盖 Cline 上游基地址（默认 `https://api.cline.bot/api/v1`） |
 
 ## 从旧插件迁移
 
@@ -252,6 +298,7 @@ python3 scripts/migrate_auths.py /path/to/cpa/auths --apply  # 执行
 | --- | --- | --- |
 | GET | `/v0/management/plugins/freetier2api/status` | 账号、额度与任务状态概览（**不含 token**） |
 | GET | `/vendors` | 已启用的供应商清单（供页面下拉与分组） |
+| POST | `/accounts/delete` | 删除指定账号凭证文件（宿主监听 auth 目录自动注销） |
 | POST | `/checkin` | 签到（body `{"account_ids":[...]}`，省略即全部） |
 | POST | `/quotas` | 批量查额度 |
 | GET | `/models` | 读取当前注册的模型清单（读缓存，不打上游） |
