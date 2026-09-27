@@ -1,7 +1,8 @@
 # 第三方来源与许可说明
 
-本插件（`workbuddy2api-plugin`）是把 **workbuddy2api** 的能力打包成 CLIProxyAPI 原生动态库插件。
-协议实现与任务体系**移植自该项目**，不是从头重写。
+本插件（`freetier2api-plugin`）把多个免费额度供应商接入 CLIProxyAPI：WorkBuddy
+（腾讯 CodeBuddy）与 Qoder。两家的协议实现与任务体系**均移植自各自的上游项目**，
+不是从头重写。
 
 ## 1. workbuddy2api（上游业务实现）
 
@@ -21,20 +22,20 @@
 
 | 本插件路径 | 上游对应 | 改造内容 |
 | --- | --- | --- |
-| `internal/cb/endpoints.go` | `internal/upstream/client.go` 的域名与路径常量 | 抽成按域索引的端点表 |
-| `internal/cb/errors.go` | `internal/upstream/client.go` 的 `Classify` 与关键词表 | 保留全部判定顺序与关键词；输出改为「Kind + HTTP 状态码」以便宿主处置 |
-| `internal/cb/headers.go` | `internal/upstream/headers.go` | 保留四类头与会话头族；去掉网关侧参数注入 |
-| `internal/cb/payload.go` | `internal/upstream/payload.go` | 保留改写管线的全部步骤与顺序 |
-| `internal/cb/thinking.go` | `internal/upstream/thinking.go` | 保留思维链注入与 `reasoning_content` 回填规则 |
-| `internal/cb/toolpair.go` | `internal/upstream/tool_pairing.go`、`truncation.go` | 保留重排、孤儿裁剪与截断丢弃逻辑 |
-| `internal/cb/sse.go` | `internal/upstream/sse.go` | 保留白名单重建与聚合；分帧改为「裸 JSON」（由宿主补 `data:` 与 `[DONE]`） |
-| `internal/cb/sanitize.go` | `internal/upstream/sanitize.go` | 规则外置为 `sanitize_rules.json`（便于审计改动过的字面量） |
-| `internal/cb/catalog*.go`、`catalog_seed.json` | `internal/upstream/model_catalog.go`、`global_models.go`、`context_catalog.go`、`effort_catalog.go` | 保留多路探测与四级查找链；静态表转为内嵌 JSON |
-| `internal/cb/growth.go`、`activity.go`、`desktop.go`、`report.go` | `internal/upstream/tasks.go`、`streak.go`、`travel.go`、`school.go`、`blackcat.go`、`desktop.go`、`report.go`、`trial.go`、`global_register.go` | 保留全部端点、事件链与节流参数 |
-| `internal/tasks/` | `internal/panel/autotask.go`、`internal/scheduler/` | 保留 17 个任务的动作与依赖序、四套指纹、异步计分轮询与幂等规则 |
-| `prompt_default.md` | `internal/prompt/defaultprompt.md` | 原文件 |
+| `internal/vendors/workbuddy/endpoints.go` | `internal/upstream/client.go` 的域名与路径常量 | 抽成按域索引的端点表 |
+| `internal/vendors/workbuddy/errors.go` | `internal/upstream/client.go` 的 `Classify` 与关键词表 | 保留全部判定顺序与关键词；输出改为「Kind + HTTP 状态码」以便宿主处置 |
+| `internal/vendors/workbuddy/headers.go` | `internal/upstream/headers.go` | 保留四类头与会话头族；去掉网关侧参数注入 |
+| `internal/vendors/workbuddy/payload.go` | `internal/upstream/payload.go` | 保留改写管线的全部步骤与顺序 |
+| `internal/vendors/workbuddy/thinking.go` | `internal/upstream/thinking.go` | 保留思维链注入与 `reasoning_content` 回填规则 |
+| `internal/vendors/workbuddy/toolpair.go` | `internal/upstream/tool_pairing.go`、`truncation.go` | 保留重排、孤儿裁剪与截断丢弃逻辑 |
+| `internal/vendors/workbuddy/sse.go` | `internal/upstream/sse.go` | 保留白名单重建与聚合；分帧改为「裸 JSON」（由宿主补 `data:` 与 `[DONE]`） |
+| `internal/vendors/workbuddy/sanitize.go` | `internal/upstream/sanitize.go` | 规则外置为 `sanitize_rules.json`（便于审计改动过的字面量） |
+| `internal/vendors/workbuddy/catalog*.go`、`catalog_seed.json` | `internal/upstream/model_catalog.go`、`global_models.go`、`context_catalog.go`、`effort_catalog.go` | 保留多路探测与四级查找链；静态表转为内嵌 JSON |
+| `internal/vendors/workbuddy/growth.go`、`activity.go`、`desktop.go`、`report.go` | `internal/upstream/tasks.go`、`streak.go`、`travel.go`、`school.go`、`blackcat.go`、`desktop.go`、`report.go`、`trial.go`、`global_register.go` | 保留全部端点、事件链与节流参数 |
+| `internal/vendors/workbuddy/tasks/` | `internal/panel/autotask.go`、`internal/scheduler/` | 保留 17 个任务的动作与依赖序、四套指纹、异步计分轮询与幂等规则 |
+| `internal/vendors/workbuddy/prompt_default.md` | `internal/prompt/defaultprompt.md` | 原文件 |
 | `auth_login.go` | `internal/panel/login.go`、`cmd/login` | OAuth 设备授权流程；改为返回宿主的 `AuthData` |
-| `internal/cb/credential.go` | `internal/auth/auth.go` | 保留双形态解析与加锁访问契约；写回改为「合并更新」以免丢失用户字段 |
+| `internal/vendors/workbuddy/credential.go` | `internal/auth/auth.go` | 保留双形态解析与加锁访问契约；写回改为「合并更新」以免丢失用户字段 |
 
 ## 2. CLIProxyAPI（宿主 ABI）
 
@@ -53,26 +54,38 @@
 `cpasdk` 是**对齐宿主契约的本地副本**，不是 import 宿主的内部包（内部包不可外部导入）。
 宿主升级若改动 ABI/JSON 契约，需要同步这里。该目录豁免 `gofmt` 检查，以保持与上游一致的排版。
 
-## 3. CLIProxyAPI-qoder2api-plugin（插件形态的参考实现）
+## 3. qoder2api（Qoder 供应商实现）
+
+- 上游仓库：https://github.com/Zhengyuuuui/qoder2api
+- 二次开发上游：https://github.com/wangtufly/QCCG
+- 许可：**GPL-3.0**（qoder2api 依据 QCCG 的开源协议二次开发）
+
+本插件的 Qoder 供应商**移植自 qoder2api**：
+
+| 本插件路径 | 上游对应 | 改造内容 |
+| --- | --- | --- |
+| `internal/vendors/qoder/cosy/` | `internal/cosy/` | 去掉账户存储耦合，保留签名、设备指纹、加密算法 |
+| `internal/vendors/qoder/bridge/` | `internal/bridge/` | 保留 chat-completions 协议转换与 SSE 信封语义；出站 HTTP 改为走宿主桥 |
+| `internal/vendors/qoder/qoderapi/endpoints.go` | 端点常量 | 抽成按区域索引的端点表 |
+| `internal/vendors/qoder/template.go` + `baseprompt.json` | 同名文件 | 原文件（Qoder 上游要求的基础提示词） |
+| `internal/vendors/qoder/checkin.go` | `checkin.go` | 签到流程与窗口判定；改为走宿主 HTTP 桥 |
+| `internal/vendors/qoder/quota.go` | `quota.go` | 额度查询与归一 |
+| `internal/vendors/qoder/login.go` | `auth_login.go` | PKCE 设备授权流程；改为返回宿主的 `AuthData` |
+
+**删除的部分**（本插件统一只做 chat-completions，多协议由 CPA 翻译）：
+上游的 `internal/bridge/claude.go`（Claude 协议）、`codex.go`（Codex 协议）、
+多格式 SSE 分帧逻辑，以及零调用点的 `cn_probe.go`（它绕过宿主 HTTP 桥且污染 stdout）。
+
+## 4. CLIProxyAPI-qoder2api-plugin（插件形态的参考）
 
 - 仓库：https://github.com/Hkxtor/CLIProxyAPI-qoder2api-plugin
-- 许可：**GPL-3.0**（该项目自身声明）
+- 许可：**GPL-3.0**
 
-本插件**不包含**该项目的任何代码，仅把它作为「CPA 插件应当长什么样」的参考实现，
-用于对齐插件侧的工程约定：
+本插件把它作为「CPA 插件应当长什么样」的参考实现，用于对齐插件侧的工程约定
+（分层结构、`cpasdk/` vendored 副本、C ABI 桥的写法、宿主回调的并发准入与关闭排空、
+控制台页复用管理密钥、出站 HTTP 双形态键名兼容）。
 
-| 借鉴的约定 | 说明 |
-| --- | --- |
-| 分层结构 | 根目录 = ABI 适配层 + 能力实现层；`internal/*` 为纯逻辑层，对配置/宿主的能力走函数注入，不反向 import main |
-| `cpasdk/` vendored 副本 | 从宿主 SDK 复制 ABI/契约类型并豁免 gofmt，避免依赖相邻仓库 |
-| C ABI 桥的写法 | `//export` 的 preamble 只放声明，C 函数定义放独立的 `.c`/`.h`（cgo 会把 preamble 复制进多个生成文件，带定义会重复符号） |
-| 宿主回调的并发准入与关闭排空 | 宿主回调不可取消，需限流 + Shutdown 时等待排空，否则 dlopen 卸载会崩 |
-| 控制台页复用管理密钥 | 与 CPA 面板同源，可解码其 localStorage 中混淆过的 `managementKey`，免去重复输入 |
-| 出站 HTTP 双形态键名兼容 | 宿主 `host.http.do` 回的 `pluginapi.HTTPResponse` 无 json tag，键名是 Go 字段名，必须兼容 snake_case |
+## 5. 本插件的许可
 
-> 该项目的 GPL-3.0 不传染到本插件：以上是**思路与工程约定**的借鉴，没有复制其代码。
-> 若后续需要搬运其具体实现，必须先按 GPL-3.0 重新评估本插件的许可。
-
-## 4. 本插件的许可
-
-MIT。移植部分沿用上游（`workbuddy2api-panel` 与 `Sliverkiss/workbuddy2api`）的 MIT 条款。
+**GPL-3.0**。WorkBuddy 部分源自 MIT 的 `workbuddy2api-panel`（可并入 GPL），
+Qoder 部分源自 **GPL-3.0** 的 `qoder2api` / QCCG，因此整体必须以 GPL-3.0 分发。

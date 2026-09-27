@@ -189,7 +189,7 @@ jobs:
             echo '    - "https://raw.githubusercontent.com/'"${GITHUB_REPOSITORY}"$'/main/registry.json"'
             echo '```'
             echo
-            echo '重启 CPA 后，在管理面板的插件商店里搜 **WorkBuddy 2API** 一键安装。'
+            echo '重启 CPA 后，在管理面板的插件商店里搜 **FreeTier 2API** 一键安装。'
             echo
             echo '## 手动安装'
             echo

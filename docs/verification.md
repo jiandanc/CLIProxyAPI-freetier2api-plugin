@@ -8,7 +8,7 @@
 gofmt -l .            # 干净（cpasdk/ 按约定豁免）
 go vet ./...          # 无告警
 go test ./... -count=1  # 全绿
-CGO_ENABLED=1 go build -buildmode=c-shared  # 产出 workbuddy2api.so（约 10 MB）
+CGO_ENABLED=1 go build -buildmode=c-shared  # 产出 freetier2api.so（约 10 MB）
 ```
 
 测试覆盖（无需真实 CPA 进程，全部走内存假宿主）：
@@ -17,7 +17,7 @@ CGO_ENABLED=1 go build -buildmode=c-shared  # 产出 workbuddy2api.so（约 10 M
 | --- | --- |
 | `plugin_test.go` | 注册响应契约（含 `executor_model_scope`）、热更新、未知方法、凭证归属判定、**realm 隔离**、静态模型元数据、非流式聚合、流式分帧与错误上报 |
 | `registry_test.go` | 三方源清单格式、插件 ID 与产物名一致、控制台页路由声明、页面静态自包含、能力与实现一致 |
-| `internal/cb/cb_test.go` | 错误分类 15 级顺序、模型避让的字段边界、重试与状态码映射、等待信息解析、凭证双形态、合并写回、指纹稳定性、缓存键隔离、改写管线各步、工具配对、SSE 聚合与白名单重建、脱敏 |
+| `internal/vendors/workbuddy/cb_test.go` | 错误分类 15 级顺序、模型避让的字段边界、重试与状态码映射、等待信息解析、凭证双形态、合并写回、指纹稳定性、缓存键隔离、改写管线各步、工具配对、SSE 聚合与白名单重建、脱敏 |
 | `internal/httpx/transport_test.go` | 宿主 HTTP 桥的**双形态键名兼容**、缺状态码的显式报错 |
 | `internal/tasks/tasks_test.go` | 各事件链结构与关键字段、小程序事件形态、指纹注入、夜猫子窗口边界 |
 
@@ -79,11 +79,11 @@ realm 隔离是本插件最容易失效的机制，已逐环节验证：
 ```bash
 # 1. 账号是否被识别（应带 realm 与余额）
 curl -H "Authorization: Bearer $CPA_MANAGEMENT_KEY" \
-  http://127.0.0.1:8317/v0/management/plugins/workbuddy2api/status
+  http://127.0.0.1:8317/v0/management/plugins/freetier2api/status
 
 # 2. 模型清单是否拉到
 curl -X POST -H "Authorization: Bearer $CPA_MANAGEMENT_KEY" \
-  http://127.0.0.1:8317/v0/management/plugins/workbuddy2api/models/refresh
+  http://127.0.0.1:8317/v0/management/plugins/freetier2api/models/refresh
 
 # 3. 对话（非流式与流式）
 curl http://127.0.0.1:8317/v1/chat/completions \
@@ -156,5 +156,5 @@ libc.musl-aarch64.so.1: cannot open shared object file
 
 ```bash
 docker run --rm -v "$PWD":/app -w /app golang:1.24-bookworm \
-  sh -c 'CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -buildmode=c-shared -o dist/workbuddy2api.so .'
+  sh -c 'CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -buildmode=c-shared -o dist/freetier2api.so .'
 ```
