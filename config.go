@@ -17,8 +17,8 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // pluginConfig 是 plugins.configs.freetier2api 解析出的有效配置。

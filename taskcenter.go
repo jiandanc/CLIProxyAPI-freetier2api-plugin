@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
-	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/vendors/workbuddy/tasks"
 )
 
@@ -143,7 +143,7 @@ func scanOneAccount(ctx context.Context, account *accountContext) accountScan {
 	scan := accountScan{
 		UID:   account.uid(),
 		Label: account.label(),
-		Realm: string(account.credential.Realm()),
+		Realm: string(workbuddy.NormalizeRegion(account.vendor.Region())),
 	}
 	if account.isGlobal() {
 		// 国际版没有成长任务体系：不报错、不发上游请求。
@@ -151,13 +151,13 @@ func scanOneAccount(ctx context.Context, account *accountContext) accountScan {
 	}
 
 	client := newUpstreamClient(ctx)
-	growth, errGrowth := client.ListTasks(ctx, account.credential)
+	growth, errGrowth := client.ListTasks(ctx, accountNative(account))
 	if errGrowth != nil {
 		scan.Error = errGrowth.Error()
 		return scan
 	}
 	// 小程序口径是默认列表的超集，合并时按任务码去重。
-	if mpTasks, errMP := client.ListTasksMP(ctx, account.credential); errMP == nil {
+	if mpTasks, errMP := client.ListTasksMP(ctx, accountNative(account)); errMP == nil {
 		growth = mergeTasks(growth, mpTasks)
 	}
 	for _, task := range growth {
@@ -171,7 +171,7 @@ func scanOneAccount(ctx context.Context, account *accountContext) accountScan {
 	})
 
 	// 开学季状态。
-	school, errSchool := client.SchoolTasks(ctx, account.credential)
+	school, errSchool := client.SchoolTasks(ctx, accountNative(account))
 	if errSchool == nil && school != nil {
 		scan.InPeriod = school.InPeriod
 		for _, task := range school.Tasks {
@@ -541,7 +541,7 @@ func acceptPendingTasks(ctx context.Context, account *accountContext) int {
 		return 0
 	}
 	client := newUpstreamClient(ctx)
-	tasksList, errTasks := client.ListTasks(ctx, account.credential)
+	tasksList, errTasks := client.ListTasks(ctx, accountNative(account))
 	if errTasks != nil {
 		return 0
 	}
@@ -568,7 +568,7 @@ func acceptPendingTasks(ctx context.Context, account *accountContext) int {
 		if end > len(codes) {
 			end = len(codes)
 		}
-		if errAccept := client.AcceptTasks(ctx, account.credential, codes[start:end]); errAccept == nil {
+		if errAccept := client.AcceptTasks(ctx, accountNative(account), codes[start:end]); errAccept == nil {
 			accepted += end - start
 		}
 		time.Sleep(1050 * time.Millisecond)
@@ -585,14 +585,14 @@ func runGrowthTask(ctx context.Context, account *accountContext, code string) (s
 	client := newUpstreamClient(ctx)
 
 	// 达标预检：如果任务已经完成/达标，直接尝试领奖，绝不再重新执行动作（避免重复消耗额度）。
-	task, errTask := findGrowthTask(ctx, client, account.credential, code)
+	task, errTask := findGrowthTask(ctx, client, accountNative(account), code)
 	if errTask == nil && task != nil {
 		if task.Claimed {
 			recordTaskResult(account.uid(), code, "任务已完成且已领奖", "done", 0, 0)
 			return "任务已完成且已领奖", 0, 0, nil
 		}
 		if task.Done() {
-			credit, energy := claimGrowthReward(ctx, client, account.credential, code)
+			credit, energy := claimGrowthReward(ctx, client, accountNative(account), code)
 			msg := "任务已达标（跳过重复执行）"
 			if credit > 0 || energy > 0 {
 				msg = fmt.Sprintf("任务已达标，已领奖 +%d 积分 +%d 能量", credit, energy)
@@ -602,15 +602,15 @@ func runGrowthTask(ctx context.Context, account *accountContext, code string) (s
 		}
 	}
 
-	message, errRun := action.Run(ctx, client, account.credential)
+	message, errRun := action.Run(ctx, client, accountNative(account))
 	if errRun != nil {
 		return "", 0, 0, errRun
 	}
 	recordTaskResult(account.uid(), code, message, "done", 0, 0)
 
 	// 等异步计分落定后自动领奖。
-	if waitGrowthClaimable(ctx, client, account.credential, code) {
-		credit, energy := claimGrowthReward(ctx, client, account.credential, code)
+	if waitGrowthClaimable(ctx, client, accountNative(account), code) {
+		credit, energy := claimGrowthReward(ctx, client, accountNative(account), code)
 		if credit > 0 || energy > 0 {
 			message += fmt.Sprintf("（领奖 +%d 积分 +%d 能量）", credit, energy)
 			recordTaskResult(account.uid(), code, message, "done", credit, energy)
@@ -692,7 +692,7 @@ func claimGrowthReward(ctx context.Context, client *workbuddy.Client, credential
 // runSchoolDaily 执行单账号的开学季闭环。
 func runSchoolDaily(ctx context.Context, account *accountContext) (string, int64, int64, error) {
 	client := newUpstreamClient(ctx)
-	message, errRun := tasks.RunSchool(ctx, client, account.credential)
+	message, errRun := tasks.RunSchool(ctx, client, accountNative(account))
 	if errRun != nil {
 		return "", 0, 0, errRun
 	}
@@ -800,7 +800,7 @@ func handleTasksAutoAll(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		entry := accountResult{
 			Label: account.label(),
 			UID:   account.uid(),
-			Realm: string(account.credential.Realm()),
+			Realm: string(workbuddy.NormalizeRegion(account.vendor.Region())),
 		}
 		if account.isGlobal() {
 			// 国际版没有成长任务体系，直接跳过（不发上游请求）。
@@ -862,7 +862,7 @@ func runAutoAll(ctx context.Context, account *accountContext) []autoAllResult {
 	}
 
 	for _, action := range autoActions {
-		task, errTask := findGrowthTask(ctx, client, account.credential, action.Code)
+		task, errTask := findGrowthTask(ctx, client, accountNative(account), action.Code)
 		if errTask != nil {
 			results = append(results, autoAllResult{
 				Code: action.Code, Status: "error", Message: errTask.Error(),
@@ -901,7 +901,7 @@ func runAutoAll(ctx context.Context, account *accountContext) []autoAllResult {
 			result.Message = message
 		}
 		// 回读最终进度供展示。
-		if latest, errLatest := findGrowthTask(ctx, client, account.credential, action.Code); errLatest == nil && latest != nil {
+		if latest, errLatest := findGrowthTask(ctx, client, accountNative(account), action.Code); errLatest == nil && latest != nil {
 			result.Progress = fmt.Sprintf("%d/%d", latest.Current, latest.Target)
 		}
 		results = append(results, result)
@@ -955,7 +955,7 @@ func schoolStatusForAccounts(ctx context.Context, callbackID string) []map[strin
 			entry := map[string]any{
 				"uid":   target.uid(),
 				"label": target.label(),
-				"realm": string(target.credential.Realm()),
+				"realm": string(workbuddy.NormalizeRegion(target.vendor.Region())),
 			}
 			if target.isGlobal() {
 				entry["in_period"] = false
@@ -966,7 +966,7 @@ func schoolStatusForAccounts(ctx context.Context, callbackID string) []map[strin
 				return
 			}
 			client := newUpstreamClient(ctx)
-			status, errStatus := client.SchoolTasks(ctx, target.credential)
+			status, errStatus := client.SchoolTasks(ctx, accountNative(target))
 			if errStatus != nil {
 				entry["error"] = errStatus.Error()
 			} else if status != nil {
@@ -980,7 +980,7 @@ func schoolStatusForAccounts(ctx context.Context, callbackID string) []map[strin
 				}
 				entry["tasks"] = list
 			}
-			if chances, errChances := client.SchoolChances(ctx, target.credential); errChances == nil {
+			if chances, errChances := client.SchoolChances(ctx, accountNative(target)); errChances == nil {
 				entry["chances"] = chances
 			}
 			mu.Lock()

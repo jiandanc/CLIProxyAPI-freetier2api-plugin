@@ -11,8 +11,8 @@ import (
 
 	"freetier2api-plugin/cpasdk/pluginabi"
 	"freetier2api-plugin/cpasdk/pluginapi"
-	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/vendors/workbuddy/tasks"
 )
 
@@ -33,12 +33,12 @@ func runCheckinAll(ctx context.Context) {
 			return nil
 		}
 		client := newUpstreamClient(ctx)
-		result, errCheckin := client.DailyCheckin(account.credential)
+		result, errCheckin := client.DailyCheckin(accountNative(account))
 		if errCheckin != nil {
 			logger.Error("checkin %s: %v", account.label(), errCheckin)
 			return nil
 		}
-		recordCheckinResult(account.credential, result)
+		recordCheckinResult(accountNative(account), result)
 		if result.Already {
 			logger.Info("checkin %s: already checked in today", account.label())
 		} else {
@@ -70,7 +70,7 @@ func runActivityAll(ctx context.Context) {
 		}
 		client := newUpstreamClient(ctx)
 		conversationID := fmt.Sprintf("wb2api-%d", nowUnixMs())
-		if errReport := client.ReportChatActivity(ctx, account.credential, conversationID, "", "", ""); errReport != nil {
+		if errReport := client.ReportChatActivity(ctx, accountNative(account), conversationID, "", "", ""); errReport != nil {
 			logger.Error("activity %s: %v", account.label(), errReport)
 			return nil
 		}
@@ -87,7 +87,7 @@ func runActivityAll(ctx context.Context) {
 // 只观测不重试：上报本身按天幂等，重试没有意义，但已知上游存在
 // 「200 但静默丢弃」的形态，留下日志便于对账。
 func checkActivityStreak(ctx context.Context, client *workbuddy.Client, account *accountContext) {
-	streak, errStreak := client.GrowthStreak(ctx, account.credential)
+	streak, errStreak := client.GrowthStreak(ctx, accountNative(account))
 	if errStreak != nil {
 		logger.Debug("activity %s: streak check failed: %v", account.label(), errStreak)
 		return
@@ -108,13 +108,13 @@ func runKeepaliveAll(ctx context.Context) {
 	count := 0
 	forEachAccount(ctx, "", func(ctx context.Context, account *accountContext) error {
 		client := newUpstreamClient(ctx)
-		if errRefresh := client.RefreshToken(account.credential); errRefresh != nil {
+		if errRefresh := client.RefreshToken(accountNative(account)); errRefresh != nil {
 			logger.Error("keepalive %s: %v", account.label(), errRefresh)
 			return nil
 		}
 		raw, okRaw := getAuthJSONByIndex(ctx, account.callbackID, account.entry.AuthIndex)
 		if okRaw {
-			if updated, errMerge := workbuddy.MergeStorageJSON(raw, account.credential); errMerge == nil {
+			if updated, errMerge := workbuddy.MergeStorageJSON(raw, accountNative(account)); errMerge == nil {
 				if _, errSave := callHostScoped(account.callbackID, pluginabi.MethodHostAuthSave, pluginapi.HostAuthSaveRequest{
 					Name: account.entry.Name,
 					JSON: updated,
@@ -123,7 +123,7 @@ func runKeepaliveAll(ctx context.Context) {
 				}
 			}
 		}
-		if errSave := workbuddy.SaveCredentialFile(account.credential.FilePath, account.credential); errSave != nil {
+		if errSave := workbuddy.SaveCredentialFile(account.credential.FilePath, accountNative(account)); errSave != nil {
 			logger.Debug("keepalive %s: save credential failed: %v", account.label(), errSave)
 		}
 		logger.Info("keepalive %s: token refreshed and saved", account.label())
@@ -145,7 +145,7 @@ func runTravelAll(ctx context.Context) {
 			return nil
 		}
 		client := newUpstreamClient(ctx)
-		message := tasks.RunTravel(ctx, client, account.credential)
+		message := tasks.RunTravel(ctx, client, accountNative(account))
 		if message != "" {
 			logger.Info("travel %s: %s", account.label(), message)
 			count++
@@ -171,7 +171,7 @@ func runBlackcatAll(ctx context.Context) {
 			return nil
 		}
 		client := newUpstreamClient(ctx)
-		message, errRun := tasks.RunBlackcat(ctx, client, account.credential)
+		message, errRun := tasks.RunBlackcat(ctx, client, accountNative(account))
 		if errRun != nil {
 			logger.Error("blackcat %s: %v", account.label(), errRun)
 			return nil
@@ -197,7 +197,7 @@ func runSchoolAll(ctx context.Context) {
 			return nil
 		}
 		client := newUpstreamClient(ctx)
-		summary, errRun := tasks.RunSchool(ctx, client, account.credential)
+		summary, errRun := tasks.RunSchool(ctx, client, accountNative(account))
 		if errRun != nil {
 			logger.Error("school %s: %v", account.label(), errRun)
 			return nil
@@ -223,7 +223,7 @@ func runStreakBonusAll(ctx context.Context) {
 			return nil
 		}
 		client := newUpstreamClient(ctx)
-		summary, errRun := tasks.RunStreakBonus(ctx, client, account.credential)
+		summary, errRun := tasks.RunStreakBonus(ctx, client, accountNative(account))
 		if errRun != nil {
 			logger.Error("streak %s: %v", account.label(), errRun)
 			return nil

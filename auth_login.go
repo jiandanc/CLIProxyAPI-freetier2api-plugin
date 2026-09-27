@@ -25,9 +25,10 @@ import (
 	"time"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
-	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/core"
 	"freetier2api-plugin/internal/httpx"
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 const (
@@ -106,44 +107,33 @@ func takeLoginSession(sessionID string) (*pendingLogin, bool) {
 
 // handleAuthLoginStart 开始一次登录，返回用户需要打开的授权链接。
 //
-// 域从请求的 Metadata 里取（控制台页会让用户选国内版还是国际版）；
-// 缺省用插件配置里启用的第一个域。
+// 登录协议**由供应商实现**：WorkBuddy 是自有 state/token 三接口，
+// Qoder 是标准 PKCE 设备码流，两者形状完全不同。根层只负责从 Metadata
+// 解析出目标供应商并按区域开关校验。
 func handleAuthLoginStart(request []byte) ([]byte, error) {
 	var rpc loginStartRPCRequest
 	if errDecode := decodeRequest(request, &rpc); errDecode != nil {
 		return nil, newPluginError("invalid_request", errDecode.Error(), http.StatusBadRequest)
 	}
-	region := loginRegion(rpc.Metadata)
-	if !realmEnabled(loadedConfig(), string(region)) {
-		return nil, newPluginError("workbuddy_realm_disabled",
-			fmt.Sprintf("realm %s is disabled by plugin configuration", region), http.StatusBadRequest)
+	vendor, errVendor := vendorForLogin(rpc.Metadata)
+	if errVendor != nil {
+		return nil, errVendor
 	}
 
 	ctx, cancel := context.WithTimeout(httpx.WithCallbackID(context.Background(), rpc.HostCallbackID), loginHTTPTimeout)
 	defer cancel()
 
-	state, authURL, errStart := requestLoginState(ctx, region)
+	response, errStart := vendor.LoginStart(ctx, rpc.Metadata)
 	if errStart != nil {
 		return nil, errorToPluginError(errStart)
 	}
-
-	sessionID := newLoginSessionID()
-	loginStoreMu.Lock()
-	gcLoginSessionsLocked()
-	loginStore[sessionID] = &pendingLogin{region: region, state: state, createdAt: time.Now()}
-	loginStoreMu.Unlock()
-
-	logger.Info("started workbuddy login (realm=%s)", region)
-	return okEnvelope(pluginapi.AuthLoginStartResponse{
-		Provider:  providerKey,
-		URL:       authURL,
-		State:     sessionID,
-		ExpiresAt: time.Now().Add(loginSessionTTL),
-		Metadata:  map[string]any{"realm": string(region)},
-	})
+	logger.Info("started login (vendor=%s)", vendor.ID())
+	return okEnvelope(response)
 }
 
 // handleAuthLoginPoll 轮询一次登录状态。
+//
+// 会话状态由供应商自己持有（各自的 state 结构不同），根层不参与。
 func handleAuthLoginPoll(request []byte) ([]byte, error) {
 	var rpc loginPollRPCRequest
 	if errDecode := decodeRequest(request, &rpc); errDecode != nil {
@@ -153,95 +143,109 @@ func handleAuthLoginPoll(request []byte) ([]byte, error) {
 	if sessionID == "" {
 		return nil, newPluginError("invalid_request", "login state is required", http.StatusBadRequest)
 	}
-
-	loginStoreMu.Lock()
-	session, okSession := loginStore[sessionID]
-	if okSession && time.Since(session.createdAt) > loginSessionTTL {
-		delete(loginStore, sessionID)
-		okSession = false
-	}
-	if okSession {
-		// 节流：控制台页会频繁轮询，但不该每次都打上游。
-		if time.Since(session.lastPoll) < loginPollMinGap {
-			loginStoreMu.Unlock()
-			return okEnvelope(pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusPending})
-		}
-		session.lastPoll = time.Now()
-	}
-	loginStoreMu.Unlock()
-
-	if !okSession {
-		return okEnvelope(pluginapi.AuthLoginPollResponse{
-			Status:  pluginapi.AuthLoginStatusError,
-			Message: "登录会话不存在或已过期，请重新发起登录",
-		})
+	vendor, errVendor := vendorForLoginSession(sessionID)
+	if errVendor != nil {
+		return nil, errVendor
 	}
 
 	ctx, cancel := context.WithTimeout(httpx.WithCallbackID(context.Background(), rpc.HostCallbackID), loginHTTPTimeout)
 	defer cancel()
 
-	accessToken, refreshToken, errToken := exchangeLoginToken(ctx, session.region, session.state)
-	if errToken != nil {
-		if isLoginPending(errToken) {
-			// 用户还没在浏览器里完成授权，继续等待。
-			return okEnvelope(pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusPending})
+	response, errPoll := vendor.LoginPoll(ctx, sessionID)
+	if errPoll != nil {
+		return nil, errorToPluginError(errPoll)
+	}
+	return okEnvelope(response)
+}
+
+// loginSessionOwner 由持有登录会话状态的供应商实现。
+//
+// 会话是供应商自己建的，id 只存在于它的状态表里；根层要判断「这个会话
+// 属于谁」只能问供应商。做成可选接口而不是塞进 core.Vendor：只有需要
+// 多步登录的供应商才关心它，其它实现不必被迫实现一个空方法。
+type loginSessionOwner interface {
+	// OwnsLoginSession 报告该会话是否由本供应商创建且仍有效。
+	OwnsLoginSession(sessionID string) bool
+}
+
+// vendorForLogin 从登录请求的 Metadata 解析目标供应商。
+//
+// 控制台页把用户选的供应商标识放在 Metadata 的 vendor 字段里；
+// 缺失时回落到配置里启用的第一个区域（兼容旧版页面只传 realm 的情况）。
+func vendorForLogin(metadata map[string]any) (core.Vendor, error) {
+	if metadata != nil {
+		if rawVendor, okVendor := metadata[core.VendorKey].(string); okVendor {
+			vendor, okLookup := core.VendorByID(rawVendor)
+			if !okLookup {
+				return nil, newPluginError("invalid_request",
+					fmt.Sprintf("unknown vendor %q", rawVendor), http.StatusBadRequest)
+			}
+			if !vendorEnabled(vendor) {
+				return nil, newPluginError("vendor_disabled",
+					fmt.Sprintf("vendor %s is disabled by plugin configuration", vendor.ID()), http.StatusBadRequest)
+			}
+			return vendor, nil
 		}
-		return okEnvelope(pluginapi.AuthLoginPollResponse{
-			Status:  pluginapi.AuthLoginStatusError,
-			Message: errToken.Error(),
-		})
+		// 旧版页面只传 realm：按区域找第一个匹配的供应商。
+		if rawRegion, okRegion := metadata["region"].(string); okRegion && strings.TrimSpace(rawRegion) != "" {
+			if vendor, okFind := firstVendorForRegion(rawRegion); okFind {
+				return vendor, nil
+			}
+		}
 	}
-
-	account, errAccount := fetchLoginAccount(ctx, session.region, session.state, accessToken)
-	if errAccount != nil {
-		// token 已拿到但账号信息失败：不丢弃 token，用最小信息落盘，
-		// 让用户至少能用起来（账号信息会在后续刷新时补齐）。
-		logger.Error("fetch account info failed after token exchange: %v", errAccount)
+	if vendor, okDefault := firstEnabledVendor(); okDefault {
+		return vendor, nil
 	}
+	return nil, newPluginError("vendor_disabled", "no vendor is enabled by plugin configuration", http.StatusBadRequest)
+}
 
-	credential := &workbuddy.Credential{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		UID:          account.uid,
-		Nickname:     account.nickname,
-		Domain:       account.domain,
-		EnterpriseID: account.enterpriseID,
+// vendorForLoginSession 按登录会话找供应商。
+//
+// 会话是供应商自己建的（状态存在各自的包里），因此这里只能遍历询问。
+// 会话数很少（同时最多一两个登录在进行），遍历代价可忽略。
+func vendorForLoginSession(sessionID string) (core.Vendor, error) {
+	// 会话存在哪个供应商里由对方的 LoginPoll 自证（会话 id 只在对方的状态表里）。
+	// 因此这里不猜，直接让每个启用的供应商去处理：第一个能认领会话的就是它。
+	for _, vendor := range core.Vendors() {
+		if !vendorEnabled(vendor) {
+			continue
+		}
+		if provider, okProvider := vendor.(loginSessionOwner); okProvider && provider.OwnsLoginSession(sessionID) {
+			return vendor, nil
+		}
 	}
-	credential.SetRealm(session.region)
-	if credential.Domain == "" {
-		credential.Domain = defaultDomainFor(credential.Realm())
+	// 都不认领（会话已过期）：交给第一个启用的供应商回「会话不存在」的友好错误，
+	// 避免把「会话过期」误报成「未知供应商」。
+	if vendor, okDefault := firstEnabledVendor(); okDefault {
+		return vendor, nil
 	}
+	return nil, newPluginError("vendor_disabled", "no vendor is enabled by plugin configuration", http.StatusBadRequest)
+}
 
-	storageJSON, errStorage := credential.StorageJSON()
-	if errStorage != nil {
-		return okEnvelope(pluginapi.AuthLoginPollResponse{
-			Status:  pluginapi.AuthLoginStatusError,
-			Message: "构建凭证失败：" + errStorage.Error(),
-		})
+// vendorEnabled 报告供应商的区域是否被配置启用。
+func vendorEnabled(vendor core.Vendor) bool {
+	return realmEnabled(loadedConfig(), vendor.Region())
+}
+
+// firstEnabledVendor 返回配置里第一个启用的供应商。
+func firstEnabledVendor() (core.Vendor, bool) {
+	for _, vendor := range core.Vendors() {
+		if vendorEnabled(vendor) {
+			return vendor, true
+		}
 	}
+	return nil, false
+}
 
-	loginStoreMu.Lock()
-	delete(loginStore, sessionID)
-	loginStoreMu.Unlock()
-
-	fileName := loginFileName(credential)
-	logger.Info("completed workbuddy login for %s (realm=%s)", firstNonEmptyString(credential.Nickname, credential.UID), credential.Realm())
-
-	auth := pluginapi.AuthData{
-		Provider:    providerKey,
-		ID:          strings.TrimSuffix(fileName, ".json"),
-		FileName:    fileName,
-		Label:       firstNonEmptyString(credential.Nickname, credential.UID),
-		StorageJSON: storageJSON,
-		Metadata:    credentialMetadata(credential),
-		Attributes:  credentialAttributes(credential),
-		// 刚登录的 token 是新鲜的，不用立刻刷新。
-		NextRefreshAfter: time.Now().Add(authRefreshInterval),
+// firstVendorForRegion 返回某个区域第一个启用的供应商。
+func firstVendorForRegion(region string) (core.Vendor, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(region))
+	for _, vendor := range core.Vendors() {
+		if vendor.Region() == normalized && vendorEnabled(vendor) {
+			return vendor, true
+		}
 	}
-	return okEnvelope(pluginapi.AuthLoginPollResponse{
-		Status: pluginapi.AuthLoginStatusSuccess,
-		Auth:   auth,
-	})
+	return nil, false
 }
 
 // loginRegion 从 Metadata 解析目标域。

@@ -62,8 +62,13 @@ func (v *workbuddyVendor) Match(fileName, provider string, raw map[string]any) b
 	if vendorID, okVendor := raw[core.VendorKey].(string); okVendor {
 		return strings.EqualFold(strings.TrimSpace(vendorID), v.ID())
 	}
-	// 其次按凭证自带的区域声明。
-	return workbuddy.RegionForCredential(raw) == v.region
+	// 其次按凭证自带的区域声明。无法判定时（扁平形手写凭证常常没有
+	// realm/domain）回落到配置的兜底区域——与解析时的兜底保持一致，
+	// 否则这类凭证会既不被 CN 也不被 GLOBAL 认领，等于加载不上。
+	if region := workbuddy.RegionForCredential(raw); region != "" {
+		return region == v.region
+	}
+	return defaultRealmForParse(loadedConfig()) == v.region
 }
 
 // Parse 把凭证 JSON 解析成 core.Credential。
@@ -117,12 +122,69 @@ func (v *workbuddyVendor) nativeCredential(cred *core.Credential) (*workbuddy.Cr
 // ---- 模型 ----
 
 // StaticModels 返回本区域的模型清单。
+//
+// 探测由协议层做（按区域的路由最多三路并发并集），这里只做形态转换：
+// 上游的 ModelInfo → 中立的 ModelDescriptor → 宿主契约类型。
 func (v *workbuddyVendor) StaticModels(ctx context.Context) ([]pluginapi.ModelInfo, error) {
-	models, errModels := modelsForRealm(ctx, v.region)
+	models, errModels := newUpstreamClient(ctx).FetchModels(v.region)
 	if errModels != nil {
 		return nil, errModels
 	}
-	return models, nil
+	publishEffortTables(v.region, models)
+	out := make([]pluginapi.ModelInfo, 0, len(models))
+	for _, model := range models {
+		out = append(out, workbuddyModelInfo(model))
+	}
+	return out, nil
+}
+
+// publishEffortTables 把模型清单里的档位信息按区域合并发布给对话路径。
+//
+// 对话请求构造时要按模型查推理档位（上游对档位校验很严），因此模型清单
+// 一拿到就把档位表推给协议层缓存。
+func publishEffortTables(region workbuddy.Region, models []workbuddy.ModelInfo) {
+	defaults := make(map[string]string, len(models))
+	supported := make(map[string][]string, len(models))
+	for _, model := range models {
+		if model.DefaultEffort != "" {
+			defaults[model.ID] = model.DefaultEffort
+		}
+		if len(model.Efforts) > 0 {
+			supported[model.ID] = model.Efforts
+		}
+	}
+	workbuddy.SetEffortTablesForRegion(region, defaults, supported)
+}
+
+// describeModelDescription 拼接模型说明（带积分倍率前缀）。
+//
+// 倍率是用户最关心的成本信息，放在说明最前面。
+func describeModelDescription(model workbuddy.ModelInfo) string {
+	description := strings.TrimSpace(model.Description)
+	credits := strings.TrimSpace(model.Credits)
+	if credits == "" {
+		return description
+	}
+	// 上游的 credits 形如 "x0.05"，去掉尾部 credit 字样避免 "x0.05 credits credit"。
+	credits = strings.TrimSuffix(credits, "credits")
+	credits = strings.TrimSuffix(credits, "credit")
+	return "[" + strings.TrimSpace(credits) + " credit] " + description
+}
+
+// workbuddyModelInfo 把协议层模型元数据转成宿主契约类型。
+func workbuddyModelInfo(model workbuddy.ModelInfo) pluginapi.ModelInfo {
+	return core.ModelInfoToPluginAPI("", core.ModelDescriptor{
+		ID:                 model.ID,
+		Name:               model.Name,
+		Description:        describeModelDescription(model),
+		ContextLength:      model.ContextWindow,
+		MaxOutputTokens:    model.MaxTokens,
+		Efforts:            model.Efforts,
+		DefaultEffort:      model.DefaultEffort,
+		SupportsImages:     model.SupportsImages,
+		SupportsTools:      model.SupportsToolCall,
+		CanDisableThinking: model.CanDisableThinking,
+	})
 }
 
 // ModelsForAuth 返回该凭证可用的模型。
@@ -312,12 +374,18 @@ func (v *workbuddyVendor) LoginPoll(ctx context.Context, state string) (*plugina
 			Message: "构建凭证失败：" + errStorage.Error(),
 		}, nil
 	}
-	fileName := core.FileNameFor(v.ID(), firstNonEmptyString(credential.UID, newLoginSessionID()))
 	logger.Info("completed workbuddy login for %s (vendor=%s)",
 		firstNonEmptyString(credential.NicknameValue(), credential.UIDValue()), v.ID())
+	// AuthData 的组装由根层做（它持有宿主 ABI 契约与 vendor 字段注入逻辑），
+	// 这里只把解析好的凭证与落盘载荷交出去。
 	return &pluginapi.AuthLoginPollResponse{
 		Status: pluginapi.AuthLoginStatusSuccess,
-		Auth:   buildAuthData(credential, fileName, storageJSON),
+		Auth: pluginapi.AuthData{
+			Provider:    core.ProviderKey,
+			FileName:    core.FileNameFor(v.ID(), firstNonEmptyString(credential.UID, newLoginSessionID())),
+			Label:       firstNonEmptyString(credential.NicknameValue(), credential.UIDValue()),
+			StorageJSON: storageJSON,
+		},
 	}, nil
 }
 
@@ -364,4 +432,14 @@ func workbuddyTaskList() []core.Task {
 		})
 	}
 	return out
+}
+
+// init 注册 WorkBuddy 的两个区域实例。
+//
+// 注册发生在包初始化期：宿主的 plugin.register 之前就绪，因此任何时刻
+// 调用 core.ResolveVendor 都能拿到完整清单。
+func init() {
+	for _, vendor := range newWorkBuddyVendors() {
+		core.RegisterVendor(vendor)
+	}
 }

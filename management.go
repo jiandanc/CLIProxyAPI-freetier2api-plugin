@@ -21,9 +21,9 @@ import (
 
 	"freetier2api-plugin/cpasdk/pluginabi"
 	"freetier2api-plugin/cpasdk/pluginapi"
-	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/httpx"
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 const (
@@ -254,8 +254,13 @@ func errorResponse(err error) pluginapi.ManagementResponse {
 // （ID / ContextLength / DisplayName）。页面按小写键读就会全部拿到 undefined，
 // 表现成一屏的 "--"。这里显式声明契约，两端一致。
 type consoleModel struct {
-	ID              string   `json:"id"`
-	ScopeID         string   `json:"scope_id"`
+	ID string `json:"id"`
+	// ScopeID 是带供应商限定的禁用键（<vendor>:<id>），供页面做勾选与禁用操作。
+	ScopeID string `json:"scope_id"`
+	// VendorID 是模型所属的供应商实例（workbuddycn 等），页面用它做分组与筛选。
+	VendorID string `json:"vendor_id"`
+	// VendorName 是供应商展示名（如「WorkBuddy 国内版」）。
+	VendorName      string   `json:"vendor_name"`
 	Realm           string   `json:"realm"`
 	Name            string   `json:"name,omitempty"`
 	Description     string   `json:"description,omitempty"`

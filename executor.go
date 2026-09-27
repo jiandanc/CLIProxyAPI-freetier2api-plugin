@@ -13,9 +13,9 @@ import (
 	"freetier2api-plugin/cpasdk/pluginabi"
 	"freetier2api-plugin/cpasdk/pluginapi"
 	"freetier2api-plugin/internal/core"
-	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/httpx"
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 const (
@@ -44,9 +44,20 @@ type rpcExecutorStreamResponse struct {
 // preparedExecution 汇集一次执行的同步校验结果。
 type preparedExecution struct {
 	rpc        executorRPCRequest
-	credential *workbuddy.Credential
-	region     workbuddy.Region
+	vendor     core.Vendor
+	credential *core.Credential
 	model      string
+}
+
+// executeRequest 把宿主的执行请求转成供应商无关的形态。
+func (p preparedExecution) executeRequest() *core.ExecuteRequest {
+	return &core.ExecuteRequest{
+		Model:    p.model,
+		Payload:  p.rpc.Payload,
+		Headers:  p.rpc.Headers,
+		ClientIP: workbuddy.ExtractClientIP(p.rpc.Headers),
+		Stream:   p.rpc.Stream,
+	}
 }
 
 // handleExecutorExecute 执行一次非流式对话。
@@ -59,21 +70,11 @@ func handleExecutorExecute(request []byte) ([]byte, error) {
 		httpx.WithCallbackID(context.Background(), prepared.rpc.HostCallbackID), executorRPCTimeout)
 	defer cancel()
 
-	client := newUpstreamClient(ctx)
-	result, errChat := client.Chat(workbuddy.ChatRequest{
-		Credential: prepared.credential,
-		Body:       prepared.rpc.Payload,
-		Model:      prepared.model,
-		ClientIP:   workbuddy.ExtractClientIP(prepared.rpc.Headers),
-		Meta:       chatMetaFor(prepared.rpc),
-	})
-	if errChat != nil {
-		return nil, errorToPluginError(errChat)
+	response, errExecute := prepared.vendor.Execute(ctx, prepared.credential, prepared.executeRequest())
+	if errExecute != nil {
+		return nil, errorToPluginError(errExecute)
 	}
-	return okEnvelope(pluginapi.ExecutorResponse{
-		Payload: result.Response,
-		Headers: http.Header{"Content-Type": []string{jsonContentType}},
-	})
+	return okEnvelope(response)
 }
 
 // handleExecutorExecuteStream 执行一次流式对话。
@@ -108,48 +109,46 @@ func handleExecutorExecuteStream(request []byte) ([]byte, error) {
 // runStreamExecution 在后台把上游 SSE 转发给宿主流。
 func runStreamExecution(streamCtx context.Context, cancelStream context.CancelFunc, prepared preparedExecution) {
 	ctx := httpx.WithCallbackID(streamCtx, prepared.rpc.HostCallbackID)
-	client := newUpstreamClient(ctx)
-
-	reader, errStream := client.ChatStream(workbuddy.ChatRequest{
-		Credential: prepared.credential,
-		Body:       prepared.rpc.Payload,
-		Model:      prepared.model,
-		ClientIP:   workbuddy.ExtractClientIP(prepared.rpc.Headers),
-		Meta:       chatMetaFor(prepared.rpc),
-	})
-	if errStream != nil {
-		// 交给 closeStream 统一收尾：先 emit 再 close 会给同一条流发两次关闭。
-		closeStream(prepared.rpc.HostCallbackID, prepared.rpc.StreamID, streamFailureMessage(errStream))
-		return
-	}
-	defer func() {
-		if errClose := reader.Close(); errClose != nil {
-			logger.Debug("close upstream stream failed: %v", errClose)
-		}
-	}()
-
 	streamID := prepared.rpc.StreamID
 	callbackID := prepared.rpc.HostCallbackID
-	failure := ""
-	_, errForward := workbuddy.Stream(reader, workbuddy.StreamOptions{
-		Emit: func(payload []byte) error {
-			if errEmit := emitStreamChunk(callbackID, streamID, payload); errEmit != nil {
-				// 下游断开：取消上游读取，静默收尾（这不是错误）。
-				cancelStream()
-				return errEmit
-			}
-			return nil
-		},
-		Hint: func(code string) string { return gatewayHint(code, prepared) },
-	})
-	if errForward != nil && !workbuddy.IsEmptyStreamError(errForward) && streamCtx.Err() == nil {
-		// 只有非取消的真实失败才报给下游；用户主动断开不该产生错误帧。
-		failure = streamFailureMessage(errForward)
-	} else if workbuddy.IsEmptyStreamError(errForward) {
-		failure = "upstream returned an empty stream (no valid data events)"
+
+	sink := &hostStreamSink{
+		callbackID:   callbackID,
+		streamID:     streamID,
+		cancelStream: cancelStream,
 	}
-	closeStream(callbackID, streamID, failure)
+	errForward := prepared.vendor.ExecuteStream(ctx, prepared.credential, prepared.executeRequest(), sink)
+	// 下游主动断开会取消上下文，那不是错误，不该发错误帧给客户端。
+	if errForward != nil && streamCtx.Err() == nil {
+		closeStream(callbackID, streamID, streamFailureMessage(errForward))
+		return
+	}
+	closeStream(callbackID, streamID, "")
 }
+
+// hostStreamSink 把宿主的流式投递能力包装成 core.StreamSink。
+//
+// 供应商只负责产出分片内容，投递（host.stream.emit）与收尾由根层统一做——
+// 这段逻辑宿主契约相关，不该让每个供应商各写一遍。
+type hostStreamSink struct {
+	callbackID   string
+	streamID     string
+	cancelStream context.CancelFunc
+}
+
+// Emit 投递一个分片。
+func (s *hostStreamSink) Emit(payload []byte) error {
+	if errEmit := emitStreamChunk(s.callbackID, s.streamID, payload); errEmit != nil {
+		// 下游断开：取消上游读取，静默收尾（这不是错误）。
+		s.cancelStream()
+		return errEmit
+	}
+	return nil
+}
+
+// Close 结束流。错误帧由调用方在拿到 ExecuteStream 的返回值后统一发，
+// 这里不重复发——同一条流发两次关闭会让客户端收到重复的结束事件。
+func (s *hostStreamSink) Close(errMsg string) error { return nil }
 
 // prepareExecution 完成同步校验：请求解码、凭证解析、模型与域解析。
 func prepareExecution(request []byte) (preparedExecution, error) {
@@ -172,32 +171,32 @@ func prepareExecution(request []byte) (preparedExecution, error) {
 	}
 
 	ctx := httpx.WithCallbackID(context.Background(), prepared.rpc.HostCallbackID)
-	credential, errCredential := credentialForAuth(ctx, prepared.rpc.HostCallbackID,
+	credential, vendor, errResolve := resolveVendorCredential(ctx, prepared.rpc.HostCallbackID,
 		prepared.rpc.StorageJSON, prepared.rpc.AuthID, prepared.rpc.AuthAttributes)
-	if errCredential != nil {
-		return prepared, newPluginError("workbuddy_credential_missing", errCredential.Error(), http.StatusUnauthorized)
+	if errResolve != nil {
+		return prepared, errResolve
 	}
+	prepared.vendor = vendor
 	prepared.credential = credential
 
-	// 模型带的 realm 前缀优先；无前缀时由凭证决定域。
-	region, bareModel := RealmForRequest(prepared.rpc.Model, credential)
-	prepared.region = region
+	// 模型带的供应商前缀优先；无前缀时就用裸名（宿主按 EqualFold 合并同名模型）。
+	_, bareModel := core.SplitModelID(prepared.rpc.Model)
 	prepared.model = bareModel
+	if strings.TrimSpace(bareModel) == "" {
+		return prepared, newPluginError("invalid_request", "model is required", http.StatusBadRequest)
+	}
 
-	// 检查模型是否已被插件配置禁用。
-	if isModelDisabled(region, bareModel) {
+	// 检查模型是否已被插件配置禁用（禁用键是 vendor:model，跨供应商互不影响）。
+	if isModelDisabled(vendor.ID(), bareModel) {
 		return prepared, newPluginError("model_disabled",
 			fmt.Sprintf("model %q is disabled by plugin configuration", prepared.rpc.Model),
 			http.StatusBadRequest)
 	}
 
-	// 域被配置关闭时直接拒绝（而不是让请求打到错误的上游域名）。
-	if !realmEnabled(loadedConfig(), string(region)) {
-		return prepared, newPluginError("workbuddy_realm_disabled",
-			fmt.Sprintf("realm %s is disabled by plugin configuration", region), http.StatusBadRequest)
-	}
-	if strings.TrimSpace(bareModel) == "" {
-		return prepared, newPluginError("invalid_request", "model is required", http.StatusBadRequest)
+	// 供应商所在的区域被配置关闭时直接拒绝（而不是让请求打到错误的上游域名）。
+	if !realmEnabled(loadedConfig(), vendor.Region()) {
+		return prepared, newPluginError("vendor_disabled",
+			fmt.Sprintf("vendor %s is disabled by plugin configuration", vendor.ID()), http.StatusBadRequest)
 	}
 	return prepared, nil
 }
@@ -366,7 +365,7 @@ func gatewayHint(code string, prepared preparedExecution) string {
 	trimmed := strings.TrimSpace(code)
 	switch trimmed {
 	case "11133":
-		if workbuddy.HasImagePart(prepared.rpc.Payload) && !modelSupportsImages(prepared) {
+		if workbuddy.HasImagePart(prepared.rpc.Payload) && !preparedSupportsImages(prepared) {
 			return "model " + prepared.model + " does not support images; pick one with image support from /v1/models"
 		}
 		return "request parameters were rejected by the model provider; check message format and model capabilities"
@@ -382,9 +381,12 @@ func gatewayHint(code string, prepared preparedExecution) string {
 	return ""
 }
 
-func modelSupportsImages(prepared preparedExecution) bool {
-	cached := workbuddy.CachedModels()[prepared.region]
-	for _, model := range cached {
+// preparedSupportsImages 报告本次执行的模型是否支持图片输入。
+//
+// 查上游模型缓存；查不到时保守返回 true（放行总比误拒好——上游会对
+// 不支持的模型给出明确错误，而误拒会让正常请求直接失败）。
+func preparedSupportsImages(prepared preparedExecution) bool {
+	for _, model := range workbuddy.CachedModels()[workbuddy.NormalizeRegion(prepared.vendor.Region())] {
 		if model.ID == prepared.model {
 			return model.SupportsImages
 		}

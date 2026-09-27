@@ -14,8 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/core"
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // 默认排程（本地时区整点）。
@@ -287,16 +288,17 @@ func forEachAccount(ctx context.Context, callbackID string, fn func(context.Cont
 		if !okRaw {
 			continue
 		}
-		credential, errParse := credentialForAuth(ctx, callbackID, raw, entry.AuthIndex, nil)
-		if errParse != nil {
-			logger.Debug("skip account %s: %v", entry.Name, errParse)
+		credential, vendor, errResolve := resolveVendorCredential(ctx, callbackID, raw, entry.AuthIndex, nil)
+		if errResolve != nil {
+			logger.Debug("skip account %s: %v", entry.Name, errResolve)
 			continue
 		}
-		if !realmEnabled(cfg, string(credential.Realm())) {
+		if !realmEnabled(cfg, vendor.Region()) {
 			continue
 		}
 		if errRun := fn(ctx, &accountContext{
 			entry:      entry,
+			vendor:     vendor,
 			credential: credential,
 			callbackID: callbackID,
 		}); errRun != nil {
@@ -315,7 +317,8 @@ const accountGap = 800 * time.Millisecond
 // accountContext 是遍历中单个账号的上下文。
 type accountContext struct {
 	entry      hostAuthEntry
-	credential *workbuddy.Credential
+	vendor     core.Vendor
+	credential *core.Credential
 	callbackID string
 }
 
@@ -324,8 +327,24 @@ func (a *accountContext) uid() string { return a.credential.UIDValue() }
 
 // label 返回展示名。
 func (a *accountContext) label() string {
-	return firstNonEmptyString(a.credential.NicknameValue(), a.entry.Label, a.entry.Name, a.entry.ID)
+	return firstNonEmptyString(a.credential.LabelValue(), a.entry.Label, a.entry.Name, a.entry.ID)
+}
+
+// native 取回协议层凭证（任务动作需要它做上游调用）。
+func (a *accountContext) native() (*workbuddy.Credential, bool) {
+	native, okNative := a.credential.Native.(*workbuddy.Credential)
+	return native, okNative && native != nil
 }
 
 // isGlobal 报告账号是否属于国际版。
-func (a *accountContext) isGlobal() bool { return a.credential.Realm().IsGlobal() }
+func (a *accountContext) isGlobal() bool { return a.vendor.Region() == "global" }
+
+// accountNative 取回账号的协议层凭证。
+//
+// 任务动作要调上游接口，而 core.Credential 是不带协议细节的通用形态，
+// 因此需要取回供应商自己的凭证对象。取不到时返回 nil——调用方要么跳过
+// 该账号，要么让上游调用报错（都好过 panic）。
+func accountNative(account *accountContext) *workbuddy.Credential {
+	native, _ := account.native()
+	return native
+}

@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // stateVersion 是状态文件结构版本，用于将来迁移。

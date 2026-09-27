@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"strings"
 
-	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/vendors/workbuddy/tasks"
 )
 

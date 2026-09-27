@@ -5,9 +5,9 @@ package tasks
 // 共同特征：都挂在「签到之后」或独立整点执行，且全部按天幂等。
 
 import (
-	"freetier2api-plugin/internal/vendors/workbuddy"
 	"context"
 	"fmt"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 	"strings"
 	"time"
 )

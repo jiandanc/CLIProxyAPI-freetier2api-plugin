@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
-	"freetier2api-plugin/internal/vendors/workbuddy"
 	"freetier2api-plugin/internal/httpx"
+	"freetier2api-plugin/internal/vendors/workbuddy"
 )
 
 // handleQuotaDescribe 描述本插件的额度能力。
@@ -27,6 +27,9 @@ func handleQuotaDescribe(request []byte) ([]byte, error) {
 }
 
 // handleQuotaFetch 查询某个账号的额度。
+//
+// 取数交给凭证所属的供应商：各家的额度接口与归一方式完全不同
+// （WorkBuddy 是积分余额，Qoder 是套餐用量桶）。
 func handleQuotaFetch(request []byte) ([]byte, error) {
 	var rpc pluginapi.QuotaFetchRequest
 	if errDecode := decodeRequest(request, &rpc); errDecode != nil {
@@ -35,47 +38,49 @@ func handleQuotaFetch(request []byte) ([]byte, error) {
 	ctx := httpx.WithCallbackID(context.Background(), "")
 	// 宿主的额度路由**不发 StorageJSON**（只发 AuthIndex/AuthID + 属性），
 	// 因此这里必须能按 index 回源，否则会误报「凭证缺失」。
-	credential, errCredential := credentialForAuth(ctx, "", rpc.StorageJSON, firstNonEmptyString(rpc.AuthIndex, rpc.AuthID), rpc.Attributes)
-	if errCredential != nil {
-		return nil, newPluginError("workbuddy_credential_missing", errCredential.Error(), http.StatusUnauthorized)
+	credential, vendor, errResolve := resolveVendorCredential(ctx, "", rpc.StorageJSON,
+		firstNonEmptyString(rpc.AuthIndex, rpc.AuthID), rpc.Attributes)
+	if errResolve != nil {
+		return nil, errResolve
 	}
 
-	client := newUpstreamClient(ctx)
-	balance, errBalance := client.FetchBalance(credential)
-	if errBalance != nil {
-		return nil, errorToPluginError(errBalance)
+	response, errQuota := vendor.Quota(ctx, credential)
+	if errQuota != nil {
+		return nil, errorToPluginError(errQuota)
 	}
-	return okEnvelope(buildQuotaResponse(credential, balance))
+	return okEnvelope(response)
 }
 
 // handleQuotaReset 执行一次签到以恢复额度。
+//
+// 语义由供应商决定：WorkBuddy 的「重置」是签到；不支持签到的供应商
+// （国际版）返回明确的不可用说明，而不是假装成功。
 func handleQuotaReset(request []byte) ([]byte, error) {
 	var rpc pluginapi.QuotaResetRequest
 	if errDecode := decodeRequest(request, &rpc); errDecode != nil {
 		return nil, newPluginError("invalid_request", errDecode.Error(), http.StatusBadRequest)
 	}
 	ctx := httpx.WithCallbackID(context.Background(), "")
-	credential, errCredential := credentialForAuth(ctx, "", rpc.StorageJSON, firstNonEmptyString(rpc.AuthIndex, rpc.AuthID), rpc.Attributes)
-	if errCredential != nil {
-		return nil, newPluginError("workbuddy_credential_missing", errCredential.Error(), http.StatusUnauthorized)
+	credential, vendor, errResolve := resolveVendorCredential(ctx, "", rpc.StorageJSON,
+		firstNonEmptyString(rpc.AuthIndex, rpc.AuthID), rpc.Attributes)
+	if errResolve != nil {
+		return nil, errResolve
 	}
-	if credential.Realm().IsGlobal() {
+	if !vendor.SupportsCheckin() {
 		return okEnvelope(pluginapi.QuotaResetResponse{
 			Success: false,
-			Message: "每日签到仅国内版账号提供；国际版账号无签到活动，额度按周期自动重置",
+			Message: "本供应商不提供签到；额度按上游周期自动重置",
 		})
 	}
 
-	client := newUpstreamClient(ctx)
-	result, errCheckin := client.DailyCheckin(credential)
+	result, errCheckin := vendor.Checkin(ctx, credential)
 	if errCheckin != nil {
 		return nil, errorToPluginError(errCheckin)
 	}
-	message := fmt.Sprintf("签到成功：+%d 积分 +%d 能量", result.Credit, result.Energy)
-	if result.Already {
-		message = "今天已经签到过了（幂等，无新增）"
+	if result == nil {
+		return okEnvelope(pluginapi.QuotaResetResponse{Success: false, Message: "签到未返回结果"})
 	}
-	return okEnvelope(pluginapi.QuotaResetResponse{Success: true, Message: message})
+	return okEnvelope(pluginapi.QuotaResetResponse{Success: true, Message: result.Message})
 }
 
 // buildQuotaResponse 把账号额度转成宿主的归一化额度结构。

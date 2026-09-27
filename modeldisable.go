@@ -16,7 +16,7 @@ import (
 	"sync"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
-	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/core"
 	"freetier2api-plugin/internal/logger"
 )
 
@@ -39,13 +39,24 @@ func reloadDisabledModelCache(disabled []string) {
 	disabledCacheSet = m
 }
 
-// isModelDisabled 检查指定域下的模型是否被禁用（支持 scoped 如 cn:model 与裸名）。
-func isModelDisabled(region workbuddy.Region, modelID string) bool {
+// isModelDisabled 检查某个供应商下的模型是否被禁用。
+//
+// 键是 <vendorID>:<裸名>（见 core.ModelKeyFor）。用供应商限定而不是裸名：
+// 同一个模型名可能来自多个供应商（如 glm-5.3 同时存在于 workbuddy 与 qoder），
+// 禁用其中一家不该影响另一家。
+//
+// 同时兼容裸键：配置里手写的旧数据可能只有裸名，那表示「所有供应商都禁用」。
+func isModelDisabled(vendorID, modelID string) bool {
 	bare := strings.TrimSpace(modelID)
 	if bare == "" {
 		return false
 	}
-	if _, b := SplitModelID(bare); b != "" {
+	// 带限定前缀时以限定为准：支持供应商 ID（workbuddycn:glm-5.2）与
+	// 区域别名（cn:glm-5.2）两种写法，后者是历史写法。
+	if prefix, b := core.SplitModelID(bare); prefix != "" {
+		if vendor, okVendor := vendorForPrefix(prefix); okVendor && vendor.ID() != vendorID {
+			return false
+		}
 		bare = b
 	}
 	disabledCacheMu.RLock()
@@ -53,8 +64,23 @@ func isModelDisabled(region workbuddy.Region, modelID string) bool {
 	if disabledCacheSet[bare] {
 		return true
 	}
-	scoped := string(region) + ":" + bare
-	return disabledCacheSet[scoped]
+	return disabledCacheSet[core.ModelKeyFor(vendorID, bare)]
+}
+
+// vendorForPrefix 把限定前缀（供应商 ID 或区域别名）解析成供应商实例。
+//
+// 区域别名（cn / global）可能对应多个供应商，取第一个匹配的即可——
+// 判定「这个限定是否排除了当前供应商」只需要知道它指的是哪个区域。
+func vendorForPrefix(prefix string) (core.Vendor, bool) {
+	if vendor, okVendor := core.VendorByID(prefix); okVendor {
+		return vendor, true
+	}
+	for _, vendor := range core.Vendors() {
+		if vendor.Region() == prefix {
+			return vendor, true
+		}
+	}
+	return nil, false
 }
 
 // modelToggleRequest 是模型禁用/启用请求。
@@ -94,10 +120,17 @@ func handleModelsToggle(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 			current[strings.TrimSpace(id)] = true
 		}
 		for _, id := range targets {
-			if body.Disabled {
-				current[id] = true
-			} else {
-				delete(current, id)
+			// 归一化到 <vendorID>:<裸名> 后再存：页面可能提交区域别名
+			// （cn:glm-5.2）或裸名，而查询侧只按规范键匹配。
+			for _, key := range strings.Split(normalizeModelKeyForStorage(id), "\n") {
+				if key == "" {
+					continue
+				}
+				if body.Disabled {
+					current[key] = true
+				} else {
+					delete(current, key)
+				}
 			}
 		}
 		next := make([]string, 0, len(current))
@@ -119,6 +152,40 @@ func handleModelsToggle(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 	})
 }
 
+// normalizeModelKeyForStorage 把待禁用的模型标识归一成存储键。
+//
+// 三种输入都要接受：
+//   - 裸名（glm-5.2）—— 对所有供应商生效，原样存；
+//   - 供应商 ID 前缀（workbuddycn:glm-5.2）—— 已是规范形式，原样存；
+//   - 区域别名前缀（cn:glm-5.2）—— 展开成该区域下所有供应商的键。
+//
+// 返回空字符串表示输入无效（调用方应忽略）。
+func normalizeModelKeyForStorage(modelID string) string {
+	trimmed := strings.TrimSpace(modelID)
+	if trimmed == "" {
+		return ""
+	}
+	prefix, bare := core.SplitModelID(trimmed)
+	if prefix == "" {
+		return bare
+	}
+	if _, okVendor := core.VendorByID(prefix); okVendor {
+		return core.ModelKeyFor(prefix, bare)
+	}
+	// 区域别名：展开成该区域下每个供应商的键。多个键用换行分隔，
+	// 由保存逻辑拆开（这里返回单个字符串以保持签名简单）。
+	keys := make([]string, 0, 4)
+	for _, vendor := range core.Vendors() {
+		if vendor.Region() == prefix {
+			keys = append(keys, core.ModelKeyFor(vendor.ID(), bare))
+		}
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	return strings.Join(keys, "\n")
+}
+
 func toggleVerb(disabled bool) string {
 	if disabled {
 		return "禁用"
@@ -126,11 +193,11 @@ func toggleVerb(disabled bool) string {
 	return "启用"
 }
 
-// filterDisabledModelsForRealm 从某域的模型清单里剔除已被禁用的模型。
-func filterDisabledModelsForRealm(region workbuddy.Region, models []pluginapi.ModelInfo) []pluginapi.ModelInfo {
+// filterDisabledModelsForVendor 从某供应商的模型清单里剔除已被禁用的模型。
+func filterDisabledModelsForVendor(vendorID string, models []pluginapi.ModelInfo) []pluginapi.ModelInfo {
 	out := make([]pluginapi.ModelInfo, 0, len(models))
 	for _, model := range models {
-		if isModelDisabled(region, model.ID) {
+		if isModelDisabled(vendorID, model.ID) {
 			continue
 		}
 		out = append(out, model)
@@ -141,8 +208,7 @@ func filterDisabledModelsForRealm(region workbuddy.Region, models []pluginapi.Mo
 // withDisabledFlag 给控制台页的模型清单打上禁用标记。
 func withDisabledFlag(models []consoleModel) []consoleModel {
 	for index := range models {
-		r := workbuddy.NormalizeRegion(models[index].Realm)
-		models[index].Disabled = isModelDisabled(r, models[index].ID)
+		models[index].Disabled = isModelDisabled(models[index].VendorID, models[index].ID)
 	}
 	return models
 }
