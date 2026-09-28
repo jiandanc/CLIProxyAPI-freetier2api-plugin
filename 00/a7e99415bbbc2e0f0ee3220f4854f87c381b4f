@@ -1,0 +1,71 @@
+internal/vendors/zcode/checkin.go
+  s_a6486448bfebff::t_d13deff480a67f 3-4,7,9-16,18-19,21,23-241,244-270
+vendor_codearts.go
+  s_a6486448bfebff::t_3bd36065198fdb 180-183
+internal/vendors/qoder/bridge/mapping.go
+  s_a6486448bfebff::t_e425351e266efa 3-7,18-45,52-85
+  s_a6486448bfebff::t_62fd2d24e0058a 46-51
+vendor_zcode.go
+  s_a6486448bfebff::t_49bc1578106316 154-166,181-182
+vendor_trae.go
+  s_a6486448bfebff::t_fb56c88399e45f 199-202
+vendor_workbuddy.go
+  s_a6486448bfebff::t_d44199568e938e 321,341-342,348-354,359-362,391,407-409
+internal/vendors/qoder/bridge/mapping_test.go
+  s_a6486448bfebff::t_f843ae82e61bac 1,7,9-10,12-27,30-74
+vendor_traesolo.go
+  s_a6486448bfebff::t_8302b4b30da1bb 182-185
+internal/vendors/traesolo/login.go
+  s_a6486448bfebff::t_2929184b824ff2 3,14,28,46-47,50,56-66,77-119
+THIRD_PARTY_NOTICES.md
+  s_a6486448bfebff::t_2932ec4cea60e0 160,175
+internal/vendors/trae/callback.go
+  s_a6486448bfebff::t_eb15739b08e38a 310
+  s_a6486448bfebff::t_f8eb24d8ccecf4 1,4,7,9,11-12,14,17,19,22-53,55-68,70-73,76-90,92-96,99-119,122-126,128-130,132-231,233-309,311-389,392,396-398,401-408,411-415,418-463
+  s_a6486448bfebff::t_94a649009eb216 54,69
+internal/vendors/zcode/quota.go
+  s_a6486448bfebff::t_6d816c23e50d95 3-4,32-33,35-55,58-90
+internal/vendors/workbuddy/login.go
+  s_a6486448bfebff::t_3c275ee47ee7f1 53-54,60,62-79,81-88,90-98,100
+vendor_qoder.go
+  s_a6486448bfebff::t_2b3f65ea693c43 449,454-457,459-460
+  s_a6486448bfebff::t_a70800f24a4b3c 543
+modeldisable.go
+  s_a6486448bfebff::t_402ea515d734f1 21-22
+  s_a6486448bfebff::t_a0ec6841f599f8 69-80
+internal/vendors/zcode/endpoints.go
+  s_a6486448bfebff::t_115e67490ce820 4,16,24-28,31-33,35
+internal/vendors/codearts/login.go
+  s_a6486448bfebff::t_0d1cbd093a7425 187-201
+  s_a6486448bfebff::t_8dbe91959e9ad6 20
+internal/vendors/zcode/login.go
+  s_a6486448bfebff::t_3b2615888d3a8d 3-4,15,21,40,80,82,103,112,125-128,136,143,148-151,155,158,162,167-181,183-192,199-201,207-356,362-369
+main.go
+  s_a6486448bfebff::t_b10243e1d60431 38
+internal/vendors/qoder/bridge/bridge.go
+  s_a6486448bfebff::t_1fc1a41861a5fa 622-626
+internal/vendors/trae/login.go
+  s_a6486448bfebff::t_b62969314cc1cf 3,27,45-46,49,53-65,77-119
+vendor_cline.go
+  s_a6486448bfebff::t_4a14a86fe9e560 255,278-279,285-291,301-304,307,331-335,341-344,348,352,356,361,364
+auth_login.go
+  s_a6486448bfebff::t_701f128f925688 145,154-166,168-180
+internal/vendors/zcode/credential.go
+  s_a6486448bfebff::t_def9d5d2f7a90c 47-67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.45-trip",
+  "base_commit_sha": "00a7e99415bbbc2e0f0ee3220f4854f87c381b4f",
+  "prompts": {},
+  "sessions": {
+    "s_a6486448bfebff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d6ce20e0-b6ef-4499-bb46-029176cd6900",
+        "model": "gemini-3.8-flash-control"
+      },
+      "human_author": "junpengchen <junpengchen@trip.com>"
+    }
+  }
+}
