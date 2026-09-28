@@ -27,7 +27,6 @@
 | `traesolo` | TRAE SOLO | `traesolo-*.json` |
 | `traecn` | Trae 国内版 | `traecn-*.json` |
 | `traeglobal` | Trae 国际版 | `traeglobal-*.json` |
-| `tabbit` | Tabbit | `tabbit-*.json` |
 | `codearts` | CodeArts | `codearts-*.json` |
 
 ## 架构：按供应商插桩
@@ -48,7 +47,6 @@ package main            ABI 适配层：把宿主 RPC 翻译成 Vendor 调用
   ├─ vendor_zcode.go       ZCode 的 core.Vendor 实现
   ├─ vendor_traesolo.go    TRAE SOLO 的 core.Vendor 实现
   ├─ vendor_trae.go        Trae 的 core.Vendor 实现（国内/国际两个区域实例）
-  ├─ vendor_tabbit.go      Tabbit 的 core.Vendor 实现
   └─ vendor_codearts.go    CodeArts 的 core.Vendor 实现
 
 internal/core           供应商无关的骨架：Vendor 接口、供应商注册表、
@@ -309,26 +307,6 @@ Trae 客户端国内版与国际版共用凭证规范，通过 `region` 或文�
 | `region` | 建议 | `cn`（国内版）或 `global`/`sg`（国际版） |
 | `access_token` | 是 | 出站 Bearer/JWT 令牌 |
 | `refresh_token` | 建议 | 换取新令牌的刷新凭证 |
-
-### Tabbit 凭证字段
-
-Tabbit 默认直连官方端点或通过 `base_url` 路由至本地网关（如 `http://127.0.0.1:50124`）：
-
-```json
-{
-  "type": "freetier",
-  "vendor": "tabbit",
-  "api_key": "sk-tabbit-...",
-  "base_url": "http://127.0.0.1:50124",
-  "label": "Tabbit 本地网关"
-}
-```
-
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `api_key` | 二选一 | 访问凭据（本地占位 key 如 `sk-tabbit-local` 或官方 Token） |
-| `session_token`| 二选一 | 浏览器端 Session Token |
-| `base_url` | 否 | 上游或本地转发网关基地址 |
 
 ### CodeArts 凭证字段
 

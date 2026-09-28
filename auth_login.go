@@ -142,7 +142,7 @@ func vendorForLogin(metadata map[string]any) (core.Vendor, error) {
 // 会话数很少（同时最多一两个登录在进行），遍历代价可忽略。
 func vendorForLoginSession(sessionID string) (core.Vendor, error) {
 	// 会话存在哪个供应商里由对方的 LoginPoll 自证（会话 id 只在对方的状态表里）。
-	// 因此这里不猜，直接让每个启用的供应商去处理：第一个能认领会话的就是它。
+	// 首先按供应商主动认领匹配：
 	for _, vendor := range core.Vendors() {
 		if !vendorEnabled(vendor) {
 			continue
@@ -151,12 +151,33 @@ func vendorForLoginSession(sessionID string) (core.Vendor, error) {
 			return vendor, nil
 		}
 	}
-	// 都不认领（会话已过期）：交给第一个启用的供应商回「会话不存在」的友好错误，
-	// 避免把「会话过期」误报成「未知供应商」。
-	if vendor, okDefault := firstEnabledVendor(); okDefault {
-		return vendor, nil
+	// 备用机制：按 sessionID 的前缀特征路由到对应的供应商，
+	// 防止由于状态清理竞争或时序差异把特定供应商的轮询发给无关的供应商。
+	normSession := strings.ToLower(strings.TrimSpace(sessionID))
+	for _, vendor := range core.Vendors() {
+		if !vendorEnabled(vendor) {
+			continue
+		}
+		vid := strings.ToLower(vendor.ID())
+		vprefix1 := vid + "_"
+		vprefix2 := strings.ReplaceAll(vid, "-", "_") + "_"
+		if strings.HasPrefix(normSession, vprefix1) || strings.HasPrefix(normSession, vprefix2) {
+			return vendor, nil
+		}
 	}
-	return nil, newPluginError("vendor_disabled", "no vendor is enabled by plugin configuration", http.StatusBadRequest)
+	// 特殊供应商别名前缀匹配
+	if strings.HasPrefix(normSession, "traesolo_") || strings.HasPrefix(normSession, "trae_solo_") {
+		if v, ok := core.VendorByID("trae-solo"); ok && vendorEnabled(v) {
+			return v, nil
+		}
+	}
+	if strings.HasPrefix(normSession, "workbuddy_") || strings.HasPrefix(normSession, "copilot_") {
+		if v, ok := firstVendorForRegion("cn"); ok {
+			return v, nil
+		}
+	}
+	// 都不认领且无匹配前缀：直接返回会话过期错误，绝不乱调用其他供应商
+	return nil, newPluginError("session_not_found", "登录会话不存在或已过期，请重新发起登录", http.StatusNotFound)
 }
 
 // vendorEnabled 报告供应商的区域是否被配置启用。

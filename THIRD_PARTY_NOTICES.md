@@ -157,20 +157,7 @@
 | `internal/vendors/trae/catalog.go` | 区域专属模型列表定义 | 严格区分国内/海外不同模型清单 |
 | `internal/vendors/trae/refresh.go` | 多区域 ExchangeToken 令牌轮换 | 自动续期与持久化 |
 
-## 10. tabbit2api（Tabbit 网关参考）
-
-- 仓库参考：`tabbit2api`
-- 作用：Tabbit 供应商模型与网关转发参考
-
-本插件中参考 tabbit2api 的部分：
-
-| 本插件路径 | 参考内容 | 说明 |
-| --- | --- | --- |
-| `internal/vendors/tabbit/endpoints.go` | 端点与本地网关地址配置 | 规范请求路由 |
-| `internal/vendors/tabbit/catalog.go` | 智能优选通道与优先级模型路由表 | 注册 `tabbit/priority` 与全套主流模型 |
-| `internal/vendors/tabbit/chat.go` | OpenAI 格式直连转发 | 快速直发与流式透传 |
-
-## 11. codearts2api（CodeArts 华为云盘古助手参考）
+## 10. codearts2api（CodeArts 华为云盘古助手参考）
 
 - 仓库参考：`codearts2api`
 - 作用：华为云 CodeArts Agent 供应商实现参考
@@ -185,7 +172,7 @@
 | `internal/vendors/codearts/catalog.go` | 内置模型探测与限时福利模型目录 | 区分内置与限时福利模型 |
 | `internal/vendors/codearts/checkin.go` | 限时免费福利套餐领取接口 | 自动领取活动配额 |
 
-## 12. 本插件的许可
+## 11. 本插件的许可
 
 **GPL-3.0**。WorkBuddy 部分源自 MIT 的 `workbuddy2api-panel`（可并入 GPL），
 Qoder 部分源自 **GPL-3.0** 的 `qoder2api` / QCCG，因此整体必须以 GPL-3.0 分发。

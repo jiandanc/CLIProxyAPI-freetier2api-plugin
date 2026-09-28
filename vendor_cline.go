@@ -252,7 +252,7 @@ func (v *clineVendor) LoginStart(ctx context.Context, meta map[string]any) (*plu
 	if errStart != nil {
 		return nil, errorToPluginError(errStart)
 	}
-	sessionID := newLoginSessionID()
+	sessionID := "cline_" + newLoginSessionID()
 	v.sessions.Store(sessionID, &clinePendingLogin{
 		deviceCode: device.DeviceCode,
 		interval:   device.Interval,
@@ -275,11 +275,18 @@ func (v *clineVendor) LoginStart(ctx context.Context, meta map[string]any) (*plu
 
 // LoginPoll 轮询一次登录状态。
 func (v *clineVendor) LoginPoll(ctx context.Context, state string) (*pluginapi.AuthLoginPollResponse, error) {
-	session, okSession := v.takeSession(state)
-	if !okSession {
+	session, exists, shouldPoll := v.takeSession(state)
+	if !exists {
 		return &pluginapi.AuthLoginPollResponse{
 			Status:  pluginapi.AuthLoginStatusError,
 			Message: "登录会话不存在或已过期，请重新发起登录",
+		}, nil
+	}
+	if !shouldPoll {
+		// 节流期间：继续保持等待状态，不打上游也不报错
+		return &pluginapi.AuthLoginPollResponse{
+			Status:  pluginapi.AuthLoginStatusPending,
+			Message: "正在等待用户在浏览器中授权...",
 		}, nil
 	}
 	credential, errPoll := cline.LoginPoll(ctx, baseURLOverride(cline.VendorID), session.deviceCode)
@@ -291,9 +298,13 @@ func (v *clineVendor) LoginPoll(ctx context.Context, state string) (*pluginapi.A
 	}
 	if credential == nil {
 		// 用户还没在浏览器里完成授权，继续等待。
-		return &pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusPending}, nil
+		return &pluginapi.AuthLoginPollResponse{
+			Status:  pluginapi.AuthLoginStatusPending,
+			Message: "正在等待用户在浏览器中授权...",
+		}, nil
 	}
 
+	v.sessions.Delete(strings.TrimSpace(state))
 	storageJSON, errStorage := credential.StorageJSON()
 	if errStorage != nil {
 		return &pluginapi.AuthLoginPollResponse{
@@ -317,34 +328,40 @@ func (v *clineVendor) LoginPoll(ctx context.Context, state string) (*pluginapi.A
 
 // OwnsLoginSession 报告该会话是否由本供应商创建。
 func (v *clineVendor) OwnsLoginSession(sessionID string) bool {
-	_, okSession := v.sessions.Load(strings.TrimSpace(sessionID))
+	trimmed := strings.TrimSpace(sessionID)
+	if strings.HasPrefix(strings.ToLower(trimmed), "cline_") {
+		return true
+	}
+	_, okSession := v.sessions.Load(trimmed)
 	return okSession
 }
 
 // takeSession 取出登录会话（含过期 GC 与轮询节流）。
 //
-// 返回 ok=false 表示会话不存在、已过期，或还没到下次轮询时间。
-func (v *clineVendor) takeSession(sessionID string) (*clinePendingLogin, bool) {
+// 返回 (session, exists, shouldPoll):
+//   - exists: 会话是否存在且在 TTL 内；
+//   - shouldPoll: 是否已过节流间隔，可以向上游发起 poll 请求。
+func (v *clineVendor) takeSession(sessionID string) (*clinePendingLogin, bool, bool) {
 	trimmed := strings.TrimSpace(sessionID)
 	value, okLoad := v.sessions.Load(trimmed)
 	if !okLoad {
-		return nil, false
+		return nil, false, false
 	}
 	session, okSession := value.(*clinePendingLogin)
 	if !okSession {
-		return nil, false
+		return nil, false, false
 	}
 	if time.Now().After(session.expiresAt) {
 		v.sessions.Delete(trimmed)
-		return nil, false
+		return nil, false, false
 	}
 	// 节流：控制台页轮询很频繁，但不该每次都打上游——上游对过快轮询
 	// 会回 slow_down，反而拖慢登录。
 	if time.Since(session.lastPoll) < session.interval {
-		return nil, false
+		return session, true, false
 	}
 	session.lastPoll = time.Now()
-	return session, true
+	return session, true, true
 }
 
 // Refresh 校验并刷新凭证。

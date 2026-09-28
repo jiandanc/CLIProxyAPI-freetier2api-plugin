@@ -17,6 +17,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -181,6 +182,21 @@ func LoginPoll(ctx context.Context, sessionID string) (*pluginapi.AuthLoginPollR
 			StorageJSON: storageJSON,
 		},
 	}, nil
+}
+
+// OwnsLoginSession 报告该会话是否属于 CodeArts。
+func OwnsLoginSession(sessionID string) bool {
+	norm := strings.ToLower(strings.TrimSpace(sessionID))
+	if strings.HasPrefix(norm, "codearts_") {
+		return true
+	}
+	loginMu.Lock()
+	defer loginMu.Unlock()
+	s, ok := loginStore[sessionID]
+	if !ok {
+		return false
+	}
+	return time.Since(s.CreatedAt) <= 15*time.Minute
 }
 
 func generatePKCE() (verifier, challenge string) {

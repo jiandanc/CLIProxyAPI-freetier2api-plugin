@@ -177,6 +177,10 @@ func (v *codeartsVendor) LoginPoll(ctx context.Context, state string) (*pluginap
 	return codearts.LoginPoll(ctx, state)
 }
 
+func (v *codeartsVendor) OwnsLoginSession(sessionID string) bool {
+	return codearts.OwnsLoginSession(sessionID)
+}
+
 func (v *codeartsVendor) Refresh(ctx context.Context, cred *core.Credential) (*core.Credential, bool, error) {
 	native, err := v.nativeCredential(cred)
 	if err != nil {

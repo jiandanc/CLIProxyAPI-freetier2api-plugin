@@ -179,6 +179,10 @@ func (v *traeSoloVendor) LoginPoll(ctx context.Context, state string) (*pluginap
 	return traesolo.LoginPoll(ctx, state)
 }
 
+func (v *traeSoloVendor) OwnsLoginSession(sessionID string) bool {
+	return traesolo.OwnsLoginSession(sessionID)
+}
+
 func (v *traeSoloVendor) Refresh(ctx context.Context, cred *core.Credential) (*core.Credential, bool, error) {
 	native, err := v.nativeCredential(cred)
 	if err != nil {

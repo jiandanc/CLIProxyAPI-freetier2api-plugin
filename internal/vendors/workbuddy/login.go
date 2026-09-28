@@ -50,29 +50,54 @@ func StoreLoginSession(sessionID string, session *PendingLogin) {
 	loginStoreMu.Unlock()
 }
 
-// TakeLoginSession 取出登录会话，同时应用节流。
-//
-// 节流是必要的：控制台页会频繁轮询，但不该每次都打上游。
-// 返回 ok=false 表示会话不存在或已过期。
-func TakeLoginSession(sessionID string) (*PendingLogin, bool) {
+// OwnsLoginSession 报告该会话是否由 WorkBuddy 持有且仍有效。
+func OwnsLoginSession(sessionID string) bool {
 	loginStoreMu.Lock()
 	defer loginStoreMu.Unlock()
 	session, okSession := loginStore[sessionID]
 	if okSession && time.Since(session.CreatedAt) > LoginSessionTTL {
 		delete(loginStore, sessionID)
-		return nil, false
+		return false
 	}
+	return okSession
+}
+
+// RemoveLoginSession 登录成功或终止后清理会话。
+func RemoveLoginSession(sessionID string) {
+	loginStoreMu.Lock()
+	delete(loginStore, sessionID)
+	loginStoreMu.Unlock()
+}
+
+// CheckLoginSession 检查登录会话状态与节流。
+// 返回 (session, exists, shouldPoll):
+//   - exists: 会话是否存在且在 TTL 内；
+//   - shouldPoll: 是否已过节流间隔，可以向上游发起 token 请求。
+func CheckLoginSession(sessionID string) (session *PendingLogin, exists bool, shouldPoll bool) {
+	loginStoreMu.Lock()
+	defer loginStoreMu.Unlock()
+	s, okSession := loginStore[sessionID]
 	if !okSession {
+		return nil, false, false
+	}
+	if time.Since(s.CreatedAt) > LoginSessionTTL {
+		delete(loginStore, sessionID)
+		return nil, false, false
+	}
+	if time.Since(s.LastPoll) < loginPollMinGap {
+		return s, true, false
+	}
+	s.LastPoll = time.Now()
+	return s, true, true
+}
+
+// TakeLoginSession 取出登录会话，同时应用节流（兼容旧调用）。
+func TakeLoginSession(sessionID string) (*PendingLogin, bool) {
+	s, exists, shouldPoll := CheckLoginSession(sessionID)
+	if !exists {
 		return nil, false
 	}
-	if time.Since(session.LastPoll) < loginPollMinGap {
-		// 仍在节流窗口内：返回会话但标记为「本轮不打上游」。
-		// 调用方据 LastPoll 判断——这里直接返回 pending 由调用方处理更清晰，
-		// 因此用一个零值 LastPoll 表示需要等待。
-		return session, false
-	}
-	session.LastPoll = time.Now()
-	return session, true
+	return s, shouldPoll
 }
 
 // loginAccount 是登录流程取到的账号信息。

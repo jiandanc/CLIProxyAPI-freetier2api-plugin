@@ -318,7 +318,7 @@ func (v *workbuddyVendor) LoginStart(ctx context.Context, meta map[string]any) (
 	if errStart != nil {
 		return nil, errStart
 	}
-	sessionID := newLoginSessionID()
+	sessionID := "workbuddy_" + string(v.region) + "_" + newLoginSessionID()
 	workbuddy.StoreLoginSession(sessionID, &workbuddy.PendingLogin{
 		Region:    v.region,
 		State:     state,
@@ -338,18 +338,28 @@ func (v *workbuddyVendor) LoginStart(ctx context.Context, meta map[string]any) (
 
 // LoginPoll 轮询一次登录状态。
 func (v *workbuddyVendor) LoginPoll(ctx context.Context, state string) (*pluginapi.AuthLoginPollResponse, error) {
-	session, okSession := workbuddy.TakeLoginSession(state)
-	if !okSession {
+	session, exists, shouldPoll := workbuddy.CheckLoginSession(state)
+	if !exists {
 		return &pluginapi.AuthLoginPollResponse{
 			Status:  pluginapi.AuthLoginStatusError,
 			Message: "登录会话不存在或已过期，请重新发起登录",
+		}, nil
+	}
+	if !shouldPoll {
+		// 节流期间：返回 pending 等待，不打上游也不报错
+		return &pluginapi.AuthLoginPollResponse{
+			Status:  pluginapi.AuthLoginStatusPending,
+			Message: "正在等待用户在浏览器中完成授权...",
 		}, nil
 	}
 	accessToken, refreshToken, errToken := workbuddy.ExchangeLoginToken(ctx, session.Region, session.State)
 	if errToken != nil {
 		if workbuddy.IsLoginPending(errToken) {
 			// 用户还没在浏览器里完成授权，继续等待。
-			return &pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusPending}, nil
+			return &pluginapi.AuthLoginPollResponse{
+				Status:  pluginapi.AuthLoginStatusPending,
+				Message: "正在等待用户在浏览器中完成授权...",
+			}, nil
 		}
 		return &pluginapi.AuthLoginPollResponse{Status: pluginapi.AuthLoginStatusError, Message: errToken.Error()}, nil
 	}
@@ -378,6 +388,7 @@ func (v *workbuddyVendor) LoginPoll(ctx context.Context, state string) (*plugina
 			Message: "构建凭证失败：" + errStorage.Error(),
 		}, nil
 	}
+	workbuddy.RemoveLoginSession(state)
 	logger.Info("completed workbuddy login for %s (vendor=%s)",
 		firstNonEmptyString(credential.NicknameValue(), credential.UIDValue()), v.ID())
 	// AuthData 的组装由根层做（它持有宿主 ABI 契约与 vendor 字段注入逻辑），
@@ -391,6 +402,11 @@ func (v *workbuddyVendor) LoginPoll(ctx context.Context, state string) (*plugina
 			StorageJSON: storageJSON,
 		},
 	}, nil
+}
+
+// OwnsLoginSession 报告该会话是否由本供应商持有且仍有效。
+func (v *workbuddyVendor) OwnsLoginSession(sessionID string) bool {
+	return workbuddy.OwnsLoginSession(sessionID)
 }
 
 // Refresh 校验并刷新凭证。

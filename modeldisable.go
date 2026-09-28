@@ -18,6 +18,8 @@ import (
 	"freetier2api-plugin/cpasdk/pluginapi"
 	"freetier2api-plugin/internal/core"
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/qoder"
+	"freetier2api-plugin/internal/vendors/qoder/bridge"
 )
 
 var (
@@ -64,7 +66,18 @@ func isModelDisabled(vendorID, modelID string) bool {
 	if disabledCacheSet[bare] {
 		return true
 	}
-	return disabledCacheSet[core.ModelKeyFor(vendorID, bare)]
+	if disabledCacheSet[core.ModelKeyFor(vendorID, bare)] {
+		return true
+	}
+	// 兼容 Qoder 历史配置中以内部 SKU (如 gfmodel) 记录的禁用状态
+	if vendorID == qoder.VendorIDCN || vendorID == qoder.VendorIDGlobal {
+		if sku := bridge.ResolveQoderModelKey(bare); sku != "" && sku != bare {
+			if disabledCacheSet[core.ModelKeyFor(vendorID, sku)] || disabledCacheSet[sku] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // vendorForPrefix 把限定前缀（供应商 ID 或区域别名）解析成供应商实例。
@@ -130,6 +143,13 @@ func handleModelsToggle(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 					current[key] = true
 				} else {
 					delete(current, key)
+					prefix, bare := core.SplitModelID(key)
+					if prefix == qoder.VendorIDCN || prefix == qoder.VendorIDGlobal {
+						if sku := bridge.ResolveQoderModelKey(bare); sku != "" && sku != bare {
+							delete(current, core.ModelKeyFor(prefix, sku))
+							delete(current, sku)
+						}
+					}
 				}
 			}
 		}

@@ -196,6 +196,10 @@ func (v *traeVendor) LoginPoll(ctx context.Context, state string) (*pluginapi.Au
 	return trae.LoginPoll(ctx, state)
 }
 
+func (v *traeVendor) OwnsLoginSession(sessionID string) bool {
+	return trae.OwnsLoginSession(sessionID, v.region)
+}
+
 func (v *traeVendor) Refresh(ctx context.Context, cred *core.Credential) (*core.Credential, bool, error) {
 	native, err := v.nativeCredential(cred)
 	if err != nil {

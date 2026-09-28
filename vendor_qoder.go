@@ -446,16 +446,18 @@ func (v *qoderVendor) bridgeCacheKey(cred *qoder.Credential) string {
 
 // qoderModelsToPluginAPI 把上游模型条目转成宿主契约类型。
 func qoderModelsToPluginAPI(models []bridge.QoderModel) []pluginapi.ModelInfo {
+	bridge.RegisterKnownModels(models)
 	out := make([]pluginapi.ModelInfo, 0, len(models))
 	for _, model := range models {
-		id := strings.TrimSpace(model.Key)
-		if id == "" {
-			continue
-		}
 		name := strings.TrimSpace(model.DisplayName)
 		if name == "" {
-			name = id
+			name = strings.TrimSpace(model.Key)
 		}
+		if name == "" {
+			continue
+		}
+		// 模型 ID 统一转小写（如 "glm-5.3-flash"），与 WorkBuddy 等供应商对齐以便宿主做跨账号路由
+		id := strings.ToLower(name)
 		out = append(out, core.ModelInfoToPluginAPI("", core.ModelDescriptor{
 			ID:                 id,
 			Name:               name,
@@ -538,6 +540,7 @@ func (r *payloadRecorder) Payload() []byte { return r.body }
 // 与 WorkBuddy 一样在包初始化期注册：宿主的 plugin.register 之前就绪，
 // 因此任何时刻调用 core.ResolveVendor 都能拿到完整清单。
 func init() {
+	bridge.RegisterKnownModels(qoder.BundledQoderModels())
 	for _, vendor := range newQoderVendors() {
 		core.RegisterVendor(vendor)
 	}

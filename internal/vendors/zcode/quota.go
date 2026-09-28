@@ -1,12 +1,11 @@
 package zcode
 
-// 额度查询：获取 ZCode 账号额度或余量信息。
-// 参考：/Users/jiandan/Workspaces/zcode2api/app/quota.py
+// 额度查询：获取 ZCode 账号额度、套餐与余量信息。
+// 参考：D:\Workspace\zcode2api\app\quota.py
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,8 +14,6 @@ import (
 	"freetier2api-plugin/cpasdk/pluginapi"
 	"freetier2api-plugin/internal/httpx"
 )
-
-var ErrQuotaUnsupported = errors.New("zcode 不支持该账号类型的额度查询")
 
 // FetchQuota 查询 ZCode 账号配额与使用量。
 func FetchQuota(ctx context.Context, cred *Credential) (*pluginapi.QuotaFetchResponse, error) {
@@ -32,35 +29,65 @@ func FetchQuota(ctx context.Context, cred *Credential) (*pluginapi.QuotaFetchRes
 		},
 	}
 
-	// 优先使用 JWT 方式查询 plan 余额
-	if cred.JWTToken != "" {
-		req, errReq := http.NewRequestWithContext(ctx, http.MethodGet, DefaultZCodeOrigin+PathBillingBalance, nil)
-		if errReq != nil {
-			return nil, errReq
-		}
-		applyHeaders(req, cred)
+	if cred.JWTToken != "" || cred.APIKey != "" {
+		client := httpx.Client(ctx, 20*time.Second)
 
-		client := httpx.Client(ctx, 30*time.Second)
-		resp, errDo := client.Do(req)
-		if errDo != nil {
-			return nil, errDo
-		}
-		defer func() { _ = resp.Body.Close() }()
-
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		if resp.StatusCode == http.StatusOK {
-			var result struct {
-				Data struct {
-					Balance float64 `json:"balance"`
-					Total   float64 `json:"total"`
-				} `json:"data"`
+		// 1. 查询当前套餐
+		reqCurrent, errReqCur := http.NewRequestWithContext(ctx, http.MethodGet, DefaultZCodeOrigin+PathBillingCurrent, nil)
+		if errReqCur == nil {
+			applyBillingHeaders(reqCurrent, cred)
+			if respCur, errCur := client.Do(reqCurrent); errCur == nil {
+				defer func() { _ = respCur.Body.Close() }()
+				bodyCur, _ := io.ReadAll(io.LimitReader(respCur.Body, 1<<20))
+				var resCur struct {
+					Code int `json:"code"`
+					Data struct {
+						Plans []struct {
+							Name   string `json:"name"`
+							PlanID string `json:"plan_id"`
+						} `json:"plans"`
+					} `json:"data"`
+				}
+				if json.Unmarshal(bodyCur, &resCur) == nil && len(resCur.Data.Plans) > 0 {
+					response.Subscription.Plan = resCur.Data.Plans[0].Name
+					response.Subscription.TierName = resCur.Data.Plans[0].PlanID
+				}
 			}
-			if err := json.Unmarshal(body, &result); err == nil {
-				response.Summary = append(response.Summary,
-					pluginapi.QuotaMetric{Key: "balance", Label: "剩余额度", Value: result.Data.Balance, Unit: "tokens"},
-					pluginapi.QuotaMetric{Key: "total", Label: "总额度", Value: result.Data.Total, Unit: "tokens"},
-				)
-				return response, nil
+		}
+
+		// 2. 查询各模型余额
+		reqBal, errReqBal := http.NewRequestWithContext(ctx, http.MethodGet, DefaultZCodeOrigin+PathBillingBalance, nil)
+		if errReqBal == nil {
+			applyBillingHeaders(reqBal, cred)
+			if respBal, errBal := client.Do(reqBal); errBal == nil {
+				defer func() { _ = respBal.Body.Close() }()
+				bodyBal, _ := io.ReadAll(io.LimitReader(respBal.Body, 1<<20))
+				var resBal struct {
+					Code int `json:"code"`
+					Data struct {
+						Balances []struct {
+							ShowName       string  `json:"show_name"`
+							Model          string  `json:"model"`
+							TotalUnits     float64 `json:"total_units"`
+							UsedUnits      float64 `json:"used_units"`
+							RemainingUnits float64 `json:"remaining_units"`
+						} `json:"balances"`
+					} `json:"data"`
+				}
+				if json.Unmarshal(bodyBal, &resBal) == nil && len(resBal.Data.Balances) > 0 {
+					for _, b := range resBal.Data.Balances {
+						name := firstNonEmpty(b.ShowName, b.Model)
+						response.Summary = append(response.Summary,
+							pluginapi.QuotaMetric{
+								Key:   "rem_" + name,
+								Label: name + " 剩余",
+								Value: b.RemainingUnits,
+								Unit:  "tokens",
+							},
+						)
+					}
+					return response, nil
+				}
 			}
 		}
 	}

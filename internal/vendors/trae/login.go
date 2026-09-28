@@ -1,6 +1,6 @@
 package trae
 
-// 本文件实现 Trae 授权登录链接生成。
+// 本文件实现 Trae 授权登录链接生成与轮询状态检查。
 
 import (
 	"context"
@@ -24,10 +24,7 @@ func BuildLoginURL(r Region, machineID, deviceID, callbackURL string) string {
 	v.Set("client_id", cfg.ClientID)
 	v.Set("redirect", "0")
 
-	traceID := machineID
-	if len(traceID) > 16 {
-		traceID = traceID[len(traceID)-16:]
-	}
+	traceID := MachineTraceID(machineID, deviceID)
 
 	return cfg.ConsoleHost + "/authorization?" + v.Encode() +
 		"&login_trace_id=" + url.QueryEscape(traceID) +
@@ -45,12 +42,27 @@ func BuildLoginURL(r Region, machineID, deviceID, callbackURL string) string {
 
 // LoginStart 启动登录流程。
 func LoginStart(ctx context.Context, r Region) (*pluginapi.AuthLoginStartResponse, error) {
+	EnsureCallbackServer()
+
 	machineID := randomHex(16)
 	deviceID := randomHex(16)
+	traceID := MachineTraceID(machineID, deviceID)
 	callbackURL := "http://127.0.0.1:18080/authorize"
 
 	loginURL := BuildLoginURL(r, machineID, deviceID, callbackURL)
-	sessionID := string(VendorIDFor(r)) + "_" + randomHex(8)
+	sessionID := "trae_" + string(r) + "_" + randomHex(8)
+
+	RegisterPending(&PendingSession{
+		SessionID: sessionID,
+		VendorID:  VendorIDFor(r),
+		Region:    r,
+		IsSolo:    false,
+		MachineID: machineID,
+		DeviceID:  deviceID,
+		TraceID:   traceID,
+		State:     "pending",
+		CreatedAt: time.Now(),
+	})
 
 	return &pluginapi.AuthLoginStartResponse{
 		Provider:  "freetier",
@@ -62,10 +74,49 @@ func LoginStart(ctx context.Context, r Region) (*pluginapi.AuthLoginStartRespons
 
 // LoginPoll 轮询状态。
 func LoginPoll(ctx context.Context, state string) (*pluginapi.AuthLoginPollResponse, error) {
-	return &pluginapi.AuthLoginPollResponse{
-		Status:  pluginapi.AuthLoginStatusPending,
-		Message: "请在浏览器中完成登录，或在管理端直接导入凭证 JSON",
-	}, nil
+	session, ok := GetPending(state)
+	if !ok || time.Since(session.CreatedAt) > 15*time.Minute {
+		return &pluginapi.AuthLoginPollResponse{
+			Status:  pluginapi.AuthLoginStatusError,
+			Message: "登录会话不存在或已过期，请重新发起登录",
+		}, nil
+	}
+
+	switch session.State {
+	case "success":
+		RemovePending(state)
+		if session.AuthData != nil {
+			return &pluginapi.AuthLoginPollResponse{
+				Status:  pluginapi.AuthLoginStatusSuccess,
+				Message: "登录成功",
+				Auth:    *session.AuthData,
+			}, nil
+		}
+		return &pluginapi.AuthLoginPollResponse{
+			Status:  pluginapi.AuthLoginStatusSuccess,
+			Message: "登录成功",
+		}, nil
+	case "failed":
+		RemovePending(state)
+		errMsg := session.ErrMsg
+		if errMsg == "" {
+			errMsg = "授权登录失败"
+		}
+		return &pluginapi.AuthLoginPollResponse{
+			Status:  pluginapi.AuthLoginStatusError,
+			Message: errMsg,
+		}, nil
+	default:
+		return &pluginapi.AuthLoginPollResponse{
+			Status:  pluginapi.AuthLoginStatusPending,
+			Message: "正在等待用户在浏览器中授权...",
+		}, nil
+	}
+}
+
+// OwnsLoginSession 报告会话是否由本区域 Trae 拥有。
+func OwnsLoginSession(sessionID string, r Region) bool {
+	return OwnsSession(sessionID, VendorIDFor(r))
 }
 
 func randomHex(n int) string {

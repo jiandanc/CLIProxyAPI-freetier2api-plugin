@@ -151,7 +151,19 @@ func (v *zcodeVendor) SupportsCheckin() bool {
 }
 
 func (v *zcodeVendor) Checkin(ctx context.Context, cred *core.Credential) (*core.CheckinResult, error) {
-	return nil, nil
+	native, err := v.nativeCredential(cred)
+	if err != nil {
+		return nil, err
+	}
+	res, errCheckin := zcode.Checkin(ctx, native)
+	if errCheckin != nil {
+		return nil, errorToPluginError(errCheckin)
+	}
+	return &core.CheckinResult{
+		Already: res.Already,
+		Credit:  res.Credit,
+		Message: res.Message,
+	}, nil
 }
 
 func (v *zcodeVendor) SupportsLogin() bool {
@@ -164,6 +176,10 @@ func (v *zcodeVendor) LoginStart(ctx context.Context, meta map[string]any) (*plu
 
 func (v *zcodeVendor) LoginPoll(ctx context.Context, state string) (*pluginapi.AuthLoginPollResponse, error) {
 	return zcode.LoginPoll(ctx, baseURLOverride(zcode.VendorID), state)
+}
+
+func (v *zcodeVendor) OwnsLoginSession(sessionID string) bool {
+	return zcode.OwnsLoginSession(sessionID)
 }
 
 func (v *zcodeVendor) Refresh(ctx context.Context, cred *core.Credential) (*core.Credential, bool, error) {

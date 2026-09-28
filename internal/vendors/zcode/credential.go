@@ -44,6 +44,27 @@ func ParseCredential(raw []byte) (*Credential, error) {
 	return c, nil
 }
 
+// StorageJSON 导出规范落盘 JSON。
+func (c *Credential) StorageJSON() ([]byte, error) {
+	m := map[string]any{
+		"type":   "freetier",
+		"vendor": VendorID,
+	}
+	if c.APIKey != "" {
+		m["api_key"] = c.APIKey
+	}
+	if c.JWTToken != "" {
+		m["jwt_token"] = c.JWTToken
+	}
+	if c.DeviceMID != "" {
+		m["device_mid"] = c.DeviceMID
+	}
+	if c.Label != "" {
+		m["label"] = c.Label
+	}
+	return json.MarshalIndent(m, "", "  ")
+}
+
 // LooksLikeCredential 判断文件或数据是否属于 ZCode。
 func LooksLikeCredential(raw map[string]any, fileName, provider string) bool {
 	// 显式声明了其它供应商时绝不认领
