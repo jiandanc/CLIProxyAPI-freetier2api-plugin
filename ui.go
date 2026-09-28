@@ -558,9 +558,9 @@ progress { width: 160px; height: 8px; }
           : "未签到"));
       }
 
-      // 额度列：多键匹配避免格式差异
+      // 额度列：优先使用账号自带的缓存额度，或多键匹配避免格式差异
       var aid = account.auth_id || "";
-      var quota = quotaByAuth[aid] || quotaByAuth[aid.replace(/\.json$/i, "")] || quotaByAuth[account.auth_index] || quotaByAuth[account.label];
+      var quota = account.quota || quotaByAuth[aid] || quotaByAuth[aid.replace(/\.json$/i, "")] || quotaByAuth[account.auth_index] || quotaByAuth[account.name] || quotaByAuth[account.uid] || quotaByAuth[account.label];
       if (!quota) {
         // 该账号还没有额度结果（首次进入或刚添加）。进入页面会自动查一次，
         // 添加账号与手动刷新也会重查，所以这里只是短暂状态。
@@ -675,13 +675,17 @@ progress { width: 160px; height: 8px; }
     return api("POST", "/quotas", {}).then(function (data) {
       if (!data) return;
       var results = (data && data.results) || [];
-      quotaByAuth = {};
       results.forEach(function (entry) {
-        if (entry.auth_id) {
-          quotaByAuth[entry.auth_id] = entry;
-          quotaByAuth[entry.auth_id.replace(/\.json$/i, "")] = entry;
-        }
-        if (entry.label) quotaByAuth[entry.label] = entry;
+        var keys = [entry.auth_id, entry.name, entry.auth_index, entry.uid, entry.label];
+        keys.forEach(function (k) {
+          if (k) {
+            var s = String(k).trim();
+            if (s) {
+              quotaByAuth[s] = entry;
+              quotaByAuth[s.replace(/\.json$/i, "")] = entry;
+            }
+          }
+        });
       });
       if (lastStatus) renderAccounts(lastStatus);
       if (quiet) return;

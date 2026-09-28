@@ -114,7 +114,78 @@
 | `internal/vendors/cline/catalog.go` | 免认证推荐模型目录 `recommended-models` 探测 | 分离 free 与 clinePass 计费档模型 |
 | `internal/vendors/cline/credential.go` | `workos:` 前缀注入与持久化管理 | 规范出站 Bearer 令牌与双格式兼容 |
 
-## 7. 本插件的许可
+## 7. zcode2api（ZCode 协议与网关参考）
+
+- 仓库参考：https://github.com/anomalyco/zcode2api 衍生之 `zcode2api`
+- 作用：ZCode (Z.AI) 供应商实现参考
+
+本插件中参考 zcode2api 的部分：
+
+| 本插件路径 | 参考内容 | 说明 |
+| --- | --- | --- |
+| `internal/vendors/zcode/endpoints.go` | 上游基地址 `https://zcode.z.ai` 与 `https://api.z.ai` 常量 | 规范端点与 UA 标识 |
+| `internal/vendors/zcode/login.go` | `/api/v1/oauth/cli/init` 与 `/poll` CLI 授权 | OAuth 授权与凭证换取 |
+| `internal/vendors/zcode/chat.go` | OpenAI ↔ Anthropic Messages 协议双向转换 | 规范 chat-completions 转换转发 |
+| `internal/vendors/zcode/quota.go` | `/api/v1/zcode-plan/billing/balance` 余额查询 | Plan 余额与配额获取 |
+
+## 8. trae2api-more（TRAE SOLO 协议参考）
+
+- 仓库参考：https://github.com/Sliverkiss/traework2api 衍生之 `trae2api-more`
+- 作用：TRAE SOLO 供应商实现参考
+
+本插件中参考 trae2api-more 的部分：
+
+| 本插件路径 | 参考内容 | 说明 |
+| --- | --- | --- |
+| `internal/vendors/traesolo/endpoints.go` | `https://trae-api-cn.mchost.guru` 与 AppID / 常量 | 规范 SOLO 端点与指纹 |
+| `internal/vendors/traesolo/chat.go` | `llm_utils_chat` 请求与 SSE 增量转换 | 改写 function="solo_work_lite" 与流式解析 |
+| `internal/vendors/traesolo/checkin.go` | 签到 claim 接口与 16 位稳定设备 ID 算法 | SHA256 账号派生设备号与 9074 退避重试 |
+| `internal/vendors/traesolo/quota.go` | `ide_user_ent_usage` 额度查询 | 账号积分与用量统计 |
+| `internal/vendors/traesolo/refresh.go` | `ExchangeToken` 令牌轮换 | 自动刷新与 StorageJSON 嵌套合并 |
+
+## 9. trae2api（Trae 国内版 / 国际版参考）
+
+- 仓库参考：`trae2api`
+- 作用：Trae 客户端（非 SOLO 版）国内版与国际版多区域实现参考
+
+本插件中参考 trae2api 的部分：
+
+| 本插件路径 | 参考内容 | 说明 |
+| --- | --- | --- |
+| `internal/vendors/trae/endpoints.go` | 国内版 (`cn`) 与国际版 (`global`/`sg`) 双部署配置 | 区分 chatHost / authHost / IDEVersion |
+| `internal/vendors/trae/chat.go` | `chat_v3` 聊天通道转发与流式处理 | 规范客户端请求头与多区域路由 |
+| `internal/vendors/trae/catalog.go` | 区域专属模型列表定义 | 严格区分国内/海外不同模型清单 |
+| `internal/vendors/trae/refresh.go` | 多区域 ExchangeToken 令牌轮换 | 自动续期与持久化 |
+
+## 10. tabbit2api（Tabbit 网关参考）
+
+- 仓库参考：`tabbit2api`
+- 作用：Tabbit 供应商模型与网关转发参考
+
+本插件中参考 tabbit2api 的部分：
+
+| 本插件路径 | 参考内容 | 说明 |
+| --- | --- | --- |
+| `internal/vendors/tabbit/endpoints.go` | 端点与本地网关地址配置 | 规范请求路由 |
+| `internal/vendors/tabbit/catalog.go` | 智能优选通道与优先级模型路由表 | 注册 `tabbit/priority` 与全套主流模型 |
+| `internal/vendors/tabbit/chat.go` | OpenAI 格式直连转发 | 快速直发与流式透传 |
+
+## 11. codearts2api（CodeArts 华为云盘古助手参考）
+
+- 仓库参考：`codearts2api`
+- 作用：华为云 CodeArts Agent 供应商实现参考
+
+本插件中参考 codearts2api 的部分：
+
+| 本插件路径 | 参考内容 | 说明 |
+| --- | --- | --- |
+| `internal/vendors/codearts/chat.go` | 华为云 `SDK-HMAC-SHA256` 算法签名与 OpenAI 原生转发 | 纯 Go 零依赖请求签名与鉴权 |
+| `internal/vendors/codearts/login.go` | 华为云 OAuth2 (Ticket + PKCE + DPoP) 流程 | Ticket 申请、轮询与 STS 凭证换取 |
+| `internal/vendors/codearts/refresh.go` | 基于 ES256 P-256 签名的 DPoP 证明与 refresh_token 轮换 | 规范 DPoP 生成与 STS 令牌自动续期 |
+| `internal/vendors/codearts/catalog.go` | 内置模型探测与限时福利模型目录 | 区分内置与限时福利模型 |
+| `internal/vendors/codearts/checkin.go` | 限时免费福利套餐领取接口 | 自动领取活动配额 |
+
+## 12. 本插件的许可
 
 **GPL-3.0**。WorkBuddy 部分源自 MIT 的 `workbuddy2api-panel`（可并入 GPL），
 Qoder 部分源自 **GPL-3.0** 的 `qoder2api` / QCCG，因此整体必须以 GPL-3.0 分发。

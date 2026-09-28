@@ -488,6 +488,36 @@ type accountSummary struct {
 	Disabled    bool           `json:"disabled"`
 	RefreshedAt string         `json:"refreshed_at,omitempty"`
 	Checkin     *checkinRecord `json:"checkin,omitempty"`
+	Quota       *quotaResult   `json:"quota,omitempty"`
+}
+
+var (
+	quotaCacheMu sync.RWMutex
+	quotaCache   = map[string]quotaResult{}
+)
+
+func getCachedQuota(keys ...string) *quotaResult {
+	quotaCacheMu.RLock()
+	defer quotaCacheMu.RUnlock()
+	for _, key := range keys {
+		if k := strings.TrimSpace(key); k != "" {
+			if q, ok := quotaCache[k]; ok {
+				copyQ := q
+				return &copyQ
+			}
+		}
+	}
+	return nil
+}
+
+func cacheQuotaResult(q quotaResult, keys ...string) {
+	quotaCacheMu.Lock()
+	defer quotaCacheMu.Unlock()
+	for _, key := range keys {
+		if k := strings.TrimSpace(key); k != "" {
+			quotaCache[k] = q
+		}
+	}
 }
 
 // listAccountSummaries 列出本插件名下的账号概览。
@@ -562,6 +592,10 @@ func listAccountSummaries(ctx context.Context, callbackID string) []accountSumma
 		}
 		// 归属解析不出来的账号保留空值：页面会退回显示宿主给的 provider 名，
 		// 硬塞一个默认区域会让用户以为它属于某个供应商（实际并没有）。
+
+		if q := getCachedQuota(accountUID, summary.AuthID, summary.AuthIndex, entry.Name, summary.Label); q != nil {
+			summary.Quota = q
+		}
 
 		// 账号唯一键：优先使用账号 UID，兜底使用规范化后的 AuthID
 		dedupKey := accountUID
@@ -904,8 +938,11 @@ func recordCheckinResult(credential *core.Credential, result *core.CheckinResult
 // 刻意返回**结构化数据**而不是一句文字：控制台页要把额度并入账号表，
 // 需要 remain/total/packages 这些字段；只回 message 的话页面无从渲染。
 type quotaResult struct {
-	AuthID string `json:"auth_id"`
-	Label  string `json:"label"`
+	AuthID    string `json:"auth_id"`
+	AuthIndex string `json:"auth_index,omitempty"`
+	Name      string `json:"name,omitempty"`
+	UID       string `json:"uid,omitempty"`
+	Label     string `json:"label"`
 	// VendorID / VendorName 让页面把额度归到正确的供应商分组下。
 	VendorID   string `json:"vendor_id,omitempty"`
 	VendorName string `json:"vendor_name,omitempty"`
@@ -971,6 +1008,15 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 				raw = r
 			}
 		}
+		if len(raw) == 0 && entry.Name != "" {
+			for _, dir := range []string{"/root/.cli-proxy-api", "./auths", "."} {
+				candidate := filepath.Join(dir, entry.Name)
+				if r, err := os.ReadFile(candidate); err == nil && len(r) > 0 {
+					raw = r
+					break
+				}
+			}
+		}
 		if len(raw) == 0 {
 			targetID := firstNonEmptyString(entry.AuthIndex, entry.ID, entry.Name)
 			if r, err := fetchAuthJSON(ctx, callbackID, targetID); err == nil && len(r) > 0 {
@@ -1010,13 +1056,14 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 			defer func() { <-semaphore }()
 			current := jobs[slot]
 			result := quotaResult{
-				AuthID:   firstNonEmptyString(current.entry.ID, current.entry.Name),
-				Label:    firstNonEmptyString(current.credential.LabelValue(), current.entry.Label, current.entry.Name),
-				VendorID: current.vendor.ID(),
-				Realm:    current.credential.RegionValue(),
+				AuthID:    firstNonEmptyString(current.entry.ID, current.entry.Name),
+				AuthIndex: current.entry.AuthIndex,
+				Name:      current.entry.Name,
+				UID:       current.credential.UIDValue(),
+				Label:     firstNonEmptyString(current.credential.LabelValue(), current.entry.Label, current.entry.Name),
+				VendorID:  current.vendor.ID(),
+				Realm:     current.credential.RegionValue(),
 			}
-			// 额度取数交给供应商：各家的额度接口与归一方式完全不同
-			// （WorkBuddy 是积分余额，Qoder 是套餐用量桶）。
 			quota, errQuota := current.vendor.Quota(ctx, current.credential)
 			if errQuota != nil {
 				result.Message = errQuota.Error()
@@ -1025,6 +1072,7 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 				result.Summary = summarizeQuotaMetrics(quota)
 				result.Remain, result.Total = normalizeQuotaNumbers(quota)
 				result.Metrics = quota.Summary
+				cacheQuotaResult(result, result.UID, result.AuthID, result.AuthIndex, result.Name, result.Label)
 			}
 			jobResults[slot] = result
 			done <- slot

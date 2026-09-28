@@ -23,6 +23,12 @@
 | `qoderglobal` | Qoder 国际版 | `qoderglobal-*.json` |
 | `opencodezen` | OpenCode ZEN | `opencodezen-*.json` |
 | `cline` | Cline | `cline-*.json` |
+| `zcode` | ZCode | `zcode-*.json` |
+| `traesolo` | TRAE SOLO | `traesolo-*.json` |
+| `traecn` | Trae 国内版 | `traecn-*.json` |
+| `traeglobal` | Trae 国际版 | `traeglobal-*.json` |
+| `tabbit` | Tabbit | `tabbit-*.json` |
+| `codearts` | CodeArts | `codearts-*.json` |
 
 ## 架构：按供应商插桩
 
@@ -38,7 +44,12 @@ package main            ABI 适配层：把宿主 RPC 翻译成 Vendor 调用
   ├─ vendor_workbuddy.go   WorkBuddy 的 core.Vendor 实现（两个区域实例）
   ├─ vendor_qoder.go       Qoder 的 core.Vendor 实现（两个区域实例）
   ├─ vendor_opencodezen.go OpenCode ZEN 的 core.Vendor 实现
-  └─ vendor_cline.go       Cline 的 core.Vendor 实现
+  ├─ vendor_cline.go       Cline 的 core.Vendor 实现
+  ├─ vendor_zcode.go       ZCode 的 core.Vendor 实现
+  ├─ vendor_traesolo.go    TRAE SOLO 的 core.Vendor 实现
+  ├─ vendor_trae.go        Trae 的 core.Vendor 实现（国内/国际两个区域实例）
+  ├─ vendor_tabbit.go      Tabbit 的 core.Vendor 实现
+  └─ vendor_codearts.go    CodeArts 的 core.Vendor 实现
 
 internal/core           供应商无关的骨架：Vendor 接口、供应商注册表、
                         共享 Credential、模型 ID 协议、信封、错误
@@ -235,6 +246,119 @@ OpenCode ZEN 无登录流程，直接用官网申请的 API key 即可：
 | `refreshToken` | 是 | 长期凭据（WorkOS 设备授权产物，续期核心） |
 | `accessToken` | 否 | 出站令牌（缺失时插件首次刷新会自动用 refreshToken 换取） |
 | `email` | 建议 | 账号展示邮箱 |
+
+### ZCode 凭证字段
+
+ZCode (Z.AI) 支持 API Key（Coding Plan 回退通道）与 JWT Token（Plan 主通道）：
+
+```json
+{
+  "type": "freetier",
+  "vendor": "zcode",
+  "api_key": "xxx.xxx",
+  "jwt_token": "...",
+  "label": "我的 ZCode 账号"
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `api_key` | 二选一 | Z.AI API Key（智谱 API 格式），免人机验证码 |
+| `jwt_token` | 二选一 | ZCode Plan 通道 JWT Token（亦可通过控制台发起 OAuth 登录自动换取） |
+| `label` | 否 | 账号展示名称 |
+
+### TRAE SOLO 凭证字段
+
+TRAE SOLO 账号凭证，支持顶层扁平字段或嵌套 `{auth: {...}, account: {...}}` 结构：
+
+```json
+{
+  "type": "freetier",
+  "vendor": "traesolo",
+  "access_token": "...",
+  "refresh_token": "...",
+  "uid": "123456",
+  "nickname": "我的 SOLO 账号"
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `access_token` | 是 | 出站 JWT 令牌（携带 `Cloud-IDE-JWT` 头） |
+| `refresh_token` | 建议 | `ExchangeToken` 续期令牌，支持轮换自动落盘 |
+| `uid` | 建议 | 用户标识（用于派生稳定签到设备 ID 与指纹） |
+
+### Trae 国内版 / 国际版凭证字段
+
+Trae 客户端国内版与国际版共用凭证规范，通过 `region` 或文件名区分：
+
+```json
+{
+  "type": "freetier",
+  "vendor": "traecn",
+  "region": "cn",
+  "access_token": "...",
+  "refresh_token": "...",
+  "uid": "123456"
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `vendor` | 建议 | `traecn` 或 `traeglobal` |
+| `region` | 建议 | `cn`（国内版）或 `global`/`sg`（国际版） |
+| `access_token` | 是 | 出站 Bearer/JWT 令牌 |
+| `refresh_token` | 建议 | 换取新令牌的刷新凭证 |
+
+### Tabbit 凭证字段
+
+Tabbit 默认直连官方端点或通过 `base_url` 路由至本地网关（如 `http://127.0.0.1:50124`）：
+
+```json
+{
+  "type": "freetier",
+  "vendor": "tabbit",
+  "api_key": "sk-tabbit-...",
+  "base_url": "http://127.0.0.1:50124",
+  "label": "Tabbit 本地网关"
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `api_key` | 二选一 | 访问凭据（本地占位 key 如 `sk-tabbit-local` 或官方 Token） |
+| `session_token`| 二选一 | 浏览器端 Session Token |
+| `base_url` | 否 | 上游或本地转发网关基地址 |
+
+### CodeArts 凭证字段
+
+华为云 CodeArts Agent 凭证，包含临时 AK/SK 与 DPoP 私钥材料：
+
+```json
+{
+  "type": "freetier",
+  "vendor": "codearts",
+  "access_key_id": "...",
+  "secret_access_key": "...",
+  "security_token": "...",
+  "refresh_token": "...",
+  "dpop_private_key": {
+    "kty": "EC",
+    "crv": "P-256",
+    "x": "...",
+    "y": "...",
+    "d": "..."
+  }
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `access_key_id` | 是 | 华为云 STS 临时 Access Key |
+| `secret_access_key` | 是 | 华为云 STS 临时 Secret Key（用于请求签名） |
+| `security_token` | 是 | 华为云 STS Security Token |
+| `refresh_token` | 建议 | 续期令牌，结合 `dpop_private_key` 自动轮换 |
+| `dpop_private_key`| 建议 | 签发 refresh_token 时绑定的 P-256 ES256 私钥 JWK |
 
 ## 客户端接入
 
