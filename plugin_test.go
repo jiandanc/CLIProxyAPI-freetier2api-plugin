@@ -426,9 +426,9 @@ func TestExecutorStreamEmitsNormalizedFrames(t *testing.T) {
 		if strings.Contains(chunk, "session_id") {
 			t.Fatalf("upstream private field leaked to downstream: %s", chunk)
 		}
-		if strings.HasPrefix(chunk, "data:") {
-			// chat-completions 必须投裸 JSON（宿主补 data: 前缀与 [DONE]）。
-			t.Fatalf("chat-completions chunk must be bare JSON, got %q", chunk)
+		if !strings.HasPrefix(chunk, "data:") {
+			// chat-completions SSE 分片必须符合标准 SSE 规范（带 data: 前缀）。
+			t.Fatalf("chat-completions chunk must have data: prefix, got %q", chunk)
 		}
 	}
 	// 第二帧缺 id，应被续传为第一帧的 id。
@@ -617,5 +617,34 @@ func TestPrepareBodyPromptModes(t *testing.T) {
 	msgsAppend := mapAppend["messages"].([]any)
 	if len(msgsAppend) != 3 || msgsAppend[1].(map[string]any)["content"] != "appended rule" {
 		t.Fatalf("append should insert prompt after leading sys, got: %v", msgsAppend)
+	}
+}
+
+// TestFormatSSEChunk 验证流式分片格式化确保满足 SSE 标准规范（以 data: 开头，以 \n\n 结尾）。
+func TestFormatSSEChunk(t *testing.T) {
+	// 1. 裸 JSON 分片自动补全 data: 与 \n\n
+	out := formatSSEChunk([]byte(`{"id":"1"}`))
+	if string(out) != "data: {\"id\":\"1\"}\n\n" {
+		t.Errorf("unexpected format: %q", string(out))
+	}
+
+	// 2. 已有 data: 前缀的分片确保末尾有 \n\n
+	out = formatSSEChunk([]byte("data: {\"id\":\"2\"}\n\n"))
+	if string(out) != "data: {\"id\":\"2\"}\n\n" {
+		t.Errorf("unexpected format: %q", string(out))
+	}
+
+	// 3. 裸 [DONE] 标记补全为 data: [DONE]\n\n
+	out = formatSSEChunk([]byte("[DONE]"))
+	if string(out) != "data: [DONE]\n\n" {
+		t.Errorf("unexpected format: %q", string(out))
+	}
+
+	// 4. 空分片返回 nil
+	if out = formatSSEChunk(nil); out != nil {
+		t.Errorf("expected nil for empty payload, got %q", string(out))
+	}
+	if out = formatSSEChunk([]byte("   \n\r  ")); out != nil {
+		t.Errorf("expected nil for whitespace payload, got %q", string(out))
 	}
 }

@@ -75,6 +75,10 @@ type pluginConfig struct {
 	ZenBaseURL string
 	// ClineBaseURL 覆盖 Cline 的上游基地址（留空用内置默认值）。
 	ClineBaseURL string
+	// MiniMaxCodeCNBaseURL 覆盖 MiniMax Code 国内版基地址。
+	MiniMaxCodeCNBaseURL string
+	// MiniMaxCodeGlobalBaseURL 覆盖 MiniMax Code 国际版基地址。
+	MiniMaxCodeGlobalBaseURL string
 }
 
 const (
@@ -190,6 +194,10 @@ func applyConfigLine(cfg *pluginConfig, key, value string) error {
 		cfg.ZenBaseURL = strings.TrimSpace(value)
 	case "cline_base_url":
 		cfg.ClineBaseURL = strings.TrimSpace(value)
+	case "minimax_code_cn_base_url", "minimax_cn_base_url":
+		cfg.MiniMaxCodeCNBaseURL = strings.TrimSpace(value)
+	case "minimax_code_global_base_url", "minimax_global_base_url":
+		cfg.MiniMaxCodeGlobalBaseURL = strings.TrimSpace(value)
 	case "state_dir":
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			cfg.StateDir = trimmed

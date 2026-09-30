@@ -21,6 +21,7 @@ import (
 	"freetier2api-plugin/internal/httpx"
 	"freetier2api-plugin/internal/logger"
 	"freetier2api-plugin/internal/vendors/cline"
+	"freetier2api-plugin/internal/vendors/minimaxcode"
 	"freetier2api-plugin/internal/vendors/opencodezen"
 	"freetier2api-plugin/internal/vendors/workbuddy"
 )
@@ -297,6 +298,10 @@ func baseURLOverride(vendorID string) string {
 		return cfg.ZenBaseURL
 	case cline.VendorID:
 		return cfg.ClineBaseURL
+	case minimaxcode.VendorIDCN:
+		return cfg.MiniMaxCodeCNBaseURL
+	case minimaxcode.VendorIDGlobal:
+		return cfg.MiniMaxCodeGlobalBaseURL
 	default:
 		return ""
 	}

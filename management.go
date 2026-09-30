@@ -67,7 +67,7 @@ func managementRegistration() pluginapi.ManagementRegistrationResponse {
 			{
 				Path:        "/console",
 				Menu:        pluginDisplayName,
-				Description: "WorkBuddy 账号、任务与额度管理页。",
+				Description: "FreeTier 账号、任务与额度管理页。",
 			},
 		},
 	}
@@ -482,13 +482,14 @@ type accountSummary struct {
 	// VendorID 是供应商实例（workbuddycn 等），页面据此分组与展示。
 	VendorID string `json:"vendor_id"`
 	// VendorName 是供应商展示名（如「Qoder 国内版」）。
-	VendorName  string         `json:"vendor_name"`
-	Realm       string         `json:"realm"`
-	Status      string         `json:"status"`
-	Disabled    bool           `json:"disabled"`
-	RefreshedAt string         `json:"refreshed_at,omitempty"`
-	Checkin     *checkinRecord `json:"checkin,omitempty"`
-	Quota       *quotaResult   `json:"quota,omitempty"`
+	VendorName      string         `json:"vendor_name"`
+	Realm           string         `json:"realm"`
+	Status          string         `json:"status"`
+	Disabled        bool           `json:"disabled"`
+	RefreshedAt     string         `json:"refreshed_at,omitempty"`
+	Checkin         *checkinRecord `json:"checkin,omitempty"`
+	Quota           *quotaResult   `json:"quota,omitempty"`
+	SupportsCheckin bool           `json:"supports_checkin"`
 }
 
 var (
@@ -566,6 +567,7 @@ func listAccountSummaries(ctx context.Context, callbackID string) []accountSumma
 				summary.Realm = credential.RegionValue()
 				if vendor, okVendor := core.VendorByID(summary.VendorID); okVendor {
 					summary.VendorName = vendor.Name()
+					summary.SupportsCheckin = vendor.SupportsCheckin()
 				}
 				if label := credential.LabelValue(); label != "" {
 					summary.Label = label
@@ -889,10 +891,10 @@ func handleCheckinRequest(req pluginapi.ManagementRequest) pluginapi.ManagementR
 	defer cancel()
 
 	results := runForAccounts(ctx, hostCallbackID(req), body.AccountIDs,
+		func(vendor core.Vendor, credential *core.Credential) bool {
+			return vendor.SupportsCheckin()
+		},
 		func(ctx context.Context, vendor core.Vendor, credential *core.Credential) (string, error) {
-			if !vendor.SupportsCheckin() {
-				return "", fmt.Errorf("%s 不提供签到", vendor.Name())
-			}
 			result, errCheckin := vendor.Checkin(ctx, credential)
 			if errCheckin != nil {
 				return "", errCheckin
@@ -1137,7 +1139,13 @@ type accountActionResult struct {
 // runForAccounts 对指定账号（或全部账号）并发执行一个动作。
 //
 // 并发度有上限：任务类操作会在上游留下行为记录，全账号瞬间并发容易被风控注意到。
-func runForAccounts(ctx context.Context, callbackID string, targets []string, action func(context.Context, core.Vendor, *core.Credential) (string, error)) []accountActionResult {
+func runForAccounts(
+	ctx context.Context,
+	callbackID string,
+	targets []string,
+	filter func(core.Vendor, *core.Credential) bool,
+	action func(context.Context, core.Vendor, *core.Credential) (string, error),
+) []accountActionResult {
 	entries, errList := listHostAuths(ctx, callbackID)
 	if errList != nil {
 		return []accountActionResult{{OK: false, Message: "读取账号列表失败：" + errList.Error()}}
@@ -1154,13 +1162,14 @@ func runForAccounts(ctx context.Context, callbackID string, targets []string, ac
 		credential *core.Credential
 	}
 	jobs := make([]job, 0, len(entries))
+	seenUID := make(map[string]bool)
 	for _, entry := range entries {
 		if len(wanted) > 0 {
 			if !wanted[entry.ID] && !wanted[entry.Name] && !wanted[entry.AuthIndex] {
 				continue
 			}
 		}
-		if entry.Disabled {
+		if entry.Disabled || entry.Unavailable {
 			continue
 		}
 		raw, okRaw := getAuthJSONByIndex(ctx, callbackID, entry.AuthIndex)
@@ -1174,6 +1183,19 @@ func runForAccounts(ctx context.Context, callbackID string, targets []string, ac
 		}
 		if !realmEnabled(cfg, vendor.Region()) {
 			continue
+		}
+		if filter != nil && !filter(vendor, credential) {
+			continue
+		}
+		uid := credential.UIDValue()
+		if uid == "" {
+			uid = firstNonEmptyString(entry.ID, entry.Name)
+		}
+		if uid != "" {
+			if seenUID[uid] {
+				continue
+			}
+			seenUID[uid] = true
 		}
 		jobs = append(jobs, job{entry: entry, vendor: vendor, credential: credential})
 	}

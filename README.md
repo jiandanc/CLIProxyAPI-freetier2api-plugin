@@ -28,6 +28,8 @@
 | `traecn` | Trae 国内版 | `traecn-*.json` |
 | `traeglobal` | Trae 国际版 | `traeglobal-*.json` |
 | `codearts` | CodeArts | `codearts-*.json` |
+| `minimaxcodecn` | MiniMax Code 国内版 | `minimaxcodecn-*.json` |
+| `minimaxcodeglobal` | MiniMax Code 国际版 | `minimaxcodeglobal-*.json` |
 
 ## 架构：按供应商插桩
 
@@ -47,7 +49,8 @@ package main            ABI 适配层：把宿主 RPC 翻译成 Vendor 调用
   ├─ vendor_zcode.go       ZCode 的 core.Vendor 实现
   ├─ vendor_traesolo.go    TRAE SOLO 的 core.Vendor 实现
   ├─ vendor_trae.go        Trae 的 core.Vendor 实现（国内/国际两个区域实例）
-  └─ vendor_codearts.go    CodeArts 的 core.Vendor 实现
+  ├─ vendor_codearts.go    CodeArts 的 core.Vendor 实现
+  └─ vendor_minimaxcode.go MiniMax Code 的 core.Vendor 实现（国内/国际两个区域实例）
 
 internal/core           供应商无关的骨架：Vendor 接口、供应商注册表、
                         共享 Credential、模型 ID 协议、信封、错误

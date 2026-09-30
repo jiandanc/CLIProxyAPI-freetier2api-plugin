@@ -3,6 +3,7 @@ package main
 // 本文件实现 executor 能力：非流式执行、流式执行、token 计数与出站 HTTP 透传。
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -136,14 +137,40 @@ type hostStreamSink struct {
 	cancelStream context.CancelFunc
 }
 
-// Emit 投递一个分片。
+// Emit 投递一个分片（确保符合 SSE 传输协议：以 data: 开头，以 \n\n 结尾）。
 func (s *hostStreamSink) Emit(payload []byte) error {
-	if errEmit := emitStreamChunk(s.callbackID, s.streamID, payload); errEmit != nil {
+	frame := formatSSEChunk(payload)
+	if len(frame) == 0 {
+		return nil
+	}
+	if errEmit := emitStreamChunk(s.callbackID, s.streamID, frame); errEmit != nil {
 		// 下游断开：取消上游读取，静默收尾（这不是错误）。
 		s.cancelStream()
 		return errEmit
 	}
 	return nil
+}
+
+// formatSSEChunk 确保分片符合标准 SSE 格式（data: <json>\n\n），
+// 满足宿主转换器（如 ConvertOpenAIResponseToClaude）对 data: 前缀的校验要求。
+func formatSSEChunk(payload []byte) []byte {
+	trimmed := bytes.TrimRight(payload, "\r\n ")
+	if len(trimmed) == 0 {
+		return nil
+	}
+	if bytes.HasPrefix(trimmed, []byte("data:")) ||
+		bytes.HasPrefix(trimmed, []byte("event:")) ||
+		bytes.HasPrefix(trimmed, []byte(":")) {
+		return append(trimmed, '\n', '\n')
+	}
+	if bytes.Equal(trimmed, []byte("[DONE]")) {
+		return []byte("data: [DONE]\n\n")
+	}
+	out := make([]byte, 0, len(trimmed)+8)
+	out = append(out, []byte("data: ")...)
+	out = append(out, trimmed...)
+	out = append(out, '\n', '\n')
+	return out
 }
 
 // Close 结束流。错误帧由调用方在拿到 ExecuteStream 的返回值后统一发，

@@ -52,10 +52,18 @@ func (e *Error) Error() string {
 
 // Classify 按 HTTP 状态码与响应体分类一个上游错误。
 func Classify(status int, body string) *Error {
+	kind := kindForStatus(status)
+	// 如果是 FreeTierError（"OpenCode's free tier can only be used from within OpenCode"），
+	// 这不是 API Key 凭证本身损坏或鉴权失效，而是上游对该特定模型施加了客户端风控/非官方客户端拦截。
+	// 此时若分类为 KindCredential 会导致宿主将整个账号标记为不可用或禁用。
+	// 将其分类为 KindClient，保留账号继续尝试其它可用模型（如 space-bunny-free 等）。
+	if strings.Contains(body, "FreeTierError") || strings.Contains(body, "free tier can only be used") {
+		kind = KindClient
+	}
 	return &Error{
 		Status: status,
 		Msg:    truncateForMessage(body, 300),
-		Kind:   kindForStatus(status),
+		Kind:   kind,
 	}
 }
 

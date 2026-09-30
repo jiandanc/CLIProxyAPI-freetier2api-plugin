@@ -3,13 +3,13 @@ package bridge
 import (
 	"encoding/json"
 	"fmt"
-	"freetier2api-plugin/internal/vendors/qoder/cosy"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"freetier2api-plugin/internal/logger"
+	"freetier2api-plugin/internal/vendors/qoder/cosy"
 )
 
 func (b *Bridge) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +55,7 @@ func (b *Bridge) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 		flusher, _ := w.(http.Flusher)
 
-		var toolCallBuf []interface{}
+		var hasToolCalls bool
 		var totalInputTokens, totalOutputTokens int
 
 		err = b.CallQoder(ctx, InferAgent(model), messages, model, tools, func(d Delta) {
@@ -76,7 +76,7 @@ func (b *Bridge) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			}
 			if d.ToolCalls != nil {
 				delta["tool_calls"] = d.ToolCalls
-				toolCallBuf = append(toolCallBuf, d.ToolCalls...)
+				hasToolCalls = true
 			}
 			data, err := json.Marshal(chunk)
 			if err != nil {
@@ -101,7 +101,7 @@ func (b *Bridge) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		finishReason := "stop"
-		if len(toolCallBuf) > 0 {
+		if hasToolCalls {
 			finishReason = "tool_calls"
 		}
 		done := MakeChatChunk(reqId, created, model)
@@ -121,7 +121,7 @@ func (b *Bridge) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		if flusher != nil {
 			flusher.Flush()
 		}
-		logger.Info("[Chat][%s] stream 完成 finish=%s tool_calls=%d 耗时=%dms", reqID, finishReason, len(toolCallBuf), time.Since(startTime).Milliseconds())
+		logger.Info("[Chat][%s] stream 完成 finish=%s 耗时=%dms", reqID, finishReason, time.Since(startTime).Milliseconds())
 	} else {
 		var full strings.Builder
 		var toolCallBuf []interface{}
@@ -135,7 +135,7 @@ func (b *Bridge) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 				full.WriteString(d.Content)
 			}
 			if d.ToolCalls != nil {
-				toolCallBuf = append(toolCallBuf, d.ToolCalls...)
+				toolCallBuf = mergeToolCallDeltas(toolCallBuf, d.ToolCalls)
 			}
 		})
 		if err != nil {
@@ -143,6 +143,7 @@ func (b *Bridge) HandleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			WriteErr(w, err)
 			return
 		}
+		toolCallBuf = filterValidToolCalls(toolCallBuf)
 		finishReason := "stop"
 		msg := map[string]interface{}{"role": "assistant", "content": full.String()}
 		if len(toolCallBuf) > 0 {

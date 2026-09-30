@@ -117,6 +117,10 @@ func parseModels(body []byte) ([]Model, error) {
 		if id == "" {
 			continue
 		}
+		// 只展示模型ID带 "free" 字符串的模型
+		if !strings.Contains(strings.ToLower(id), "free") {
+			continue
+		}
 		contextWindow := entry.ContextWindow
 		if contextWindow == 0 {
 			contextWindow = entry.ContextLength

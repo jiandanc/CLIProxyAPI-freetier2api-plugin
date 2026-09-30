@@ -73,10 +73,11 @@ tr:last-child td { border-bottom: none; }
 label { display: inline-flex; align-items: center; gap: 6px; }
 input[type=text], input[type=number] { padding: 6px 8px; border: 1px solid var(--border);
         border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 13px; }
-.banner { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; display: none; }
+.banner { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; display: none; transition: opacity .2s ease; }
 .banner.show { display: block; }
 .banner.err { background: rgba(207,34,46,.1); border: 1px solid var(--err); color: var(--err); }
 .banner.ok { background: rgba(26,127,55,.1); border: 1px solid var(--ok); color: var(--ok); }
+.banner.warn { background: rgba(154,103,0,.1); border: 1px solid var(--warn); color: var(--warn); }
 .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
 progress { width: 160px; height: 8px; }
 .dropdown { position: relative; display: inline-block; }
@@ -328,14 +329,27 @@ progress { width: 160px; height: 8px; }
     } catch (e) { return manualKey; }
   }
 
-  function banner(kind, text) {
+  var bannerTimer = null;
+
+  function banner(kind, text, duration) {
+    if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
     var el = document.getElementById("banner");
+    if (!el) return;
     el.className = "banner show " + kind;
     el.textContent = text;
+    // 默认自动消失时间：ok 5秒，warn 6秒，err 8秒。若传入 0 则持续显示直到被下一次操作替换或手动清除
+    var timeout = duration !== undefined ? duration : (kind === "ok" ? 5000 : (kind === "warn" ? 6000 : 8000));
+    if (timeout > 0) {
+      bannerTimer = setTimeout(function () {
+        clearBanner();
+      }, timeout);
+    }
   }
 
   function clearBanner() {
-    document.getElementById("banner").className = "banner";
+    if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
+    var el = document.getElementById("banner");
+    if (el) el.className = "banner";
   }
 
   // 鉴权失败立即停掉所有自动刷新：CPA 会按 IP 统计失败次数并封禁。
@@ -513,7 +527,7 @@ progress { width: 160px; height: 8px; }
     var accounts = (status && status.accounts) || [];
     setText("accountCount", accounts.length ? "（" + accounts.length + " 个）" : "");
     if (!accounts.length) {
-      host.appendChild(el("div", "没有账号。请在 CPA 面板的「添加认证」里选择 WorkBuddy 2API，或在控制台页发起登录。", "muted"));
+      host.appendChild(el("div", "没有账号。请在 CPA 面板的「添加认证」里选择 FreeTier 2API，或在控制台页发起登录。", "muted"));
       return;
     }
     // 排序：供应商名称 + 账号 ID（同一供应商聚合展示，供应商内按账号 ID 升序）
@@ -547,10 +561,14 @@ progress { width: 160px; height: 8px; }
       row.appendChild(el("td", accountDisplay(account)));
       row.appendChild(cellWith(account.disabled ? pill("已禁用", "err") : pill("正常", "ok")));
 
-      // 签到列：国际版没有签到体系（原项目的 D4 门控：global 无签到/成长任务，
-      // 一律跳过且不发起上游调用）。这里显式标注，避免被误读成"功能坏了"。
+      // 签到列：如果供应商本身不支持签到（或国际版无活动），显式标注「无签到活动」，避免被误读成未签到
       var checkin = account.checkin || {};
-      if (account.realm === "global") {
+      var supportsCheckin = account.supports_checkin;
+      if (supportsCheckin === undefined) {
+        var v = vendorsById[account.vendor_id];
+        supportsCheckin = v ? v.supports_checkin : (account.realm !== "global");
+      }
+      if (!supportsCheckin) {
         row.appendChild(el("td", "无签到活动", "muted"));
       } else {
         row.appendChild(el("td", checkin.last_date
@@ -568,9 +586,8 @@ progress { width: 160px; height: 8px; }
         cell.colSpan = 2;
         row.appendChild(cell);
       } else if (!quota.ok) {
-        var errCell = el("td", quota.message || "查询失败", "muted");
-        errCell.colSpan = 2;
-        row.appendChild(errCell);
+        row.appendChild(el("td", "-- / --", "muted"));
+        row.appendChild(el("td", "--", "muted"));
       } else {
         row.appendChild(el("td", quota.remain + " / " + quota.total));
         var ratio = quota.total > 0 ? (quota.remain / quota.total) : 0;
@@ -671,7 +688,7 @@ progress { width: 160px; height: 8px; }
   // quiet 为 true 时不弹横幅——进入页面会自动跑一次，那时不需要打扰用户；
   // 手动点按钮时才给反馈。
   function loadQuotas(quiet) {
-    if (!quiet) banner("ok", "正在查询全部账号额度…");
+    if (!quiet) banner("ok", "正在查询全部账号额度…", 0);
     return api("POST", "/quotas", {}).then(function (data) {
       if (!data) return;
       var results = (data && data.results) || [];
@@ -691,9 +708,9 @@ progress { width: 160px; height: 8px; }
       if (quiet) return;
       var failed = results.filter(function (r) { return !r.ok; }).length;
       banner(failed ? "warn" : "ok",
-        "额度查询完成：" + results.length + " 个账号" + (failed ? "，" + failed + " 个失败" : ""));
+        "额度查询完成：" + results.length + " 个账号" + (failed ? "，" + failed + " 个失败" : ""), 5000);
     }).catch(function (err) {
-      if (!quiet) banner("err", err.message);
+      if (!quiet) banner("err", err.message, 8000);
       throw err;
     });
   }
@@ -1133,7 +1150,7 @@ progress { width: 160px; height: 8px; }
   document.getElementById("btnRefresh").addEventListener("click", function () {
     var btn = this;
     btn.disabled = true;
-    banner("ok", "正在向腾讯上游发起全账号 Token 续期刷新，请稍候…");
+    banner("ok", "正在向各供应商发起全账号 Token 续期刷新，请稍候…", 0);
     api("POST", "/keepalive", {}).then(function (res) {
       if (!res) return;
       if (res.failed > 0 && res.succeeded === 0) {
@@ -1177,7 +1194,7 @@ progress { width: 160px; height: 8px; }
     }
     var btn = this;
     btn.disabled = true;
-    banner("ok", "已开始逐账号执行一键完成，请勿关闭页面…");
+    banner("ok", "已开始逐账号执行一键完成，请勿关闭页面…", 0);
     api("POST", "/tasks/auto_all", {}).then(function (data) {
       if (!data) return;
       var lines = [];
@@ -1188,27 +1205,40 @@ progress { width: 160px; height: 8px; }
         var errs = results.filter(function (r) { return r.status === "error"; }).length;
         lines.push((entry.label || "") + "：完成 " + done + (errs ? "，失败 " + errs : ""));
       });
-      banner("ok", "全部账号执行完毕 —— " + (lines.join("；") || "无结果"));
-      loadStatus();
+      banner("ok", "全部账号执行完毕 —— " + (lines.join("；") || "无结果"), 5000);
+      loadStatus(true);
     }).catch(function (err) {
-      banner("err", "执行失败：" + err.message);
+      banner("err", "执行失败：" + err.message, 8000);
     }).then(function () { btn.disabled = false; });
   });
 
   document.getElementById("btnCheckin").addEventListener("click", function () {
-    banner("ok", "签到已在后台开始，稍后刷新查看结果");
+    var btn = this;
+    btn.disabled = true;
+    banner("ok", "签到已在后台开始，请稍候…", 0);
     api("POST", "/checkin", {}).then(function (result) {
       var results = (result && result.results) || [];
-      banner("ok", "签到完成：" + results.filter(function (r) { return r.ok; }).length + " / " + results.length + " 成功");
-    }).catch(function (err) { banner("err", err.message); });
+      if (!results.length) {
+        banner("ok", "当前没有需要签到的账号", 5000);
+        return;
+      }
+      var successCount = results.filter(function (r) { return r.ok; }).length;
+      var total = results.length;
+      banner(successCount === total ? "ok" : "warn", "签到完成：" + successCount + " / " + total + " 成功", 5000);
+      loadStatus(true);
+    }).catch(function (err) {
+      banner("err", "签到失败：" + err.message, 8000);
+    }).then(function () {
+      btn.disabled = false;
+    });
   });
   document.getElementById("btnScan").addEventListener("click", function () {
-    banner("ok", "正在扫描全部账号…");
+    banner("ok", "正在扫描全部账号…", 0);
     api("POST", "/tasks/scan", {}).then(function (payload) {
       if (!payload) return;
       renderScans(payload);
-      banner("ok", "扫描完成：共 " + (payload.pending_count || 0) + " 个待办");
-    }).catch(function (err) { banner("err", err.message); });
+      banner("ok", "扫描完成：共 " + (payload.pending_count || 0) + " 个待办", 5000);
+    }).catch(function (err) { banner("err", err.message, 8000); });
   });
   document.getElementById("btnRunQueue").addEventListener("click", function () {
     var conc = parseInt(document.getElementById("queueConc").value, 10) || 1;

@@ -41,12 +41,14 @@ func RunChatCompletions(b *Bridge, payload []byte, w io.Writer) error {
 			content.WriteString(d.Content)
 		}
 		if d.ToolCalls != nil {
-			toolCallBuf = append(toolCallBuf, d.ToolCalls...)
+			toolCallBuf = mergeToolCallDeltas(toolCallBuf, d.ToolCalls)
 		}
 	})
 	if errCall != nil {
 		return errCall
 	}
+
+	toolCallBuf = filterValidToolCalls(toolCallBuf)
 
 	finishReason := "stop"
 	message := map[string]interface{}{"role": "assistant", "content": content.String()}
@@ -80,8 +82,7 @@ func RunChatCompletions(b *Bridge, payload []byte, w io.Writer) error {
 
 // StreamChatCompletions 执行一次流式 chat-completions，逐帧交给 emit。
 //
-// emit 收到的是**裸 JSON 载荷**（不含 `data: ` 前缀）——帧包装由宿主按
-// 声明格式完成。末尾的 [DONE] 标记同样由宿主添加，这里不发。
+// emit 收到的是裸 JSON 载荷，外层由 hostStreamSink.Emit 统一格式化为合法的 SSE 格式。
 func StreamChatCompletions(b *Bridge, payload []byte, emit func([]byte) error) error {
 	req, errDecode := decodeChatRequest(payload)
 	if errDecode != nil {
@@ -91,7 +92,7 @@ func StreamChatCompletions(b *Bridge, payload []byte, emit func([]byte) error) e
 	created := cosy.UnixSec()
 	messages := BuildQoderMessages(b.templateMessages(), req.Messages, req.Prompt, req.ToolsUsed)
 
-	var toolCallBuf []interface{}
+	var hasToolCalls bool
 	var inputTokens, outputTokens int
 	errCall := b.CallQoder(context.Background(), InferAgent(req.Model), messages, req.Model, req.Tools, func(d Delta) {
 		if d.InputTokens > 0 || d.OutputTokens > 0 {
@@ -113,7 +114,7 @@ func StreamChatCompletions(b *Bridge, payload []byte, emit func([]byte) error) e
 				}
 				if d.ToolCalls != nil {
 					delta["tool_calls"] = d.ToolCalls
-					toolCallBuf = append(toolCallBuf, d.ToolCalls...)
+					hasToolCalls = true
 				}
 			}
 		}
@@ -129,7 +130,7 @@ func StreamChatCompletions(b *Bridge, payload []byte, emit func([]byte) error) e
 
 	// 收尾帧：finish_reason 与 usage。
 	finishReason := "stop"
-	if len(toolCallBuf) > 0 {
+	if hasToolCalls {
 		finishReason = "tool_calls"
 	}
 	done := MakeChatChunk(reqID, created, req.Model)
@@ -151,6 +152,116 @@ func StreamChatCompletions(b *Bridge, payload []byte, emit func([]byte) error) e
 		return errMarshal
 	}
 	return emit(encoded)
+}
+
+// mergeToolCallDeltas 按 index 累加流式工具分片，将 arguments 增量拼成完整工具调用。
+func mergeToolCallDeltas(accumulated []interface{}, incoming []interface{}) []interface{} {
+	for _, raw := range incoming {
+		call, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		idx := intFromAny(call["index"])
+		var target map[string]interface{}
+		for _, item := range accumulated {
+			if existing, okMap := item.(map[string]interface{}); okMap {
+				if intFromAny(existing["index"]) == idx {
+					target = existing
+					break
+				}
+			}
+		}
+		if target == nil {
+			target = cloneToolCall(call)
+			target["index"] = idx
+			accumulated = append(accumulated, target)
+			continue
+		}
+		if id, okID := call["id"].(string); okID && id != "" {
+			target["id"] = id
+		}
+		if tp, okTp := call["type"].(string); okTp && tp != "" {
+			target["type"] = tp
+		}
+		if fnIncoming, okFn := call["function"].(map[string]interface{}); okFn {
+			fnTarget, _ := target["function"].(map[string]interface{})
+			if fnTarget == nil {
+				fnTarget = map[string]interface{}{}
+				target["function"] = fnTarget
+			}
+			if name, okName := fnIncoming["name"].(string); okName && name != "" {
+				fnTarget["name"] = name
+			}
+			if args, okArgs := fnIncoming["arguments"].(string); okArgs && args != "" {
+				prevArgs, _ := fnTarget["arguments"].(string)
+				fnTarget["arguments"] = prevArgs + args
+			}
+		}
+	}
+	return accumulated
+}
+
+// filterValidToolCalls 剔除没有有效 function.name 的残缺工具调用，并按 index 升序排序。
+func filterValidToolCalls(calls []interface{}) []interface{} {
+	var valid []interface{}
+	for _, item := range calls {
+		call, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		fn, okFn := call["function"].(map[string]interface{})
+		if !okFn {
+			continue
+		}
+		name, _ := fn["name"].(string)
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		valid = append(valid, call)
+	}
+	for i := 1; i < len(valid); i++ {
+		for j := i; j > 0; j-- {
+			left, _ := valid[j-1].(map[string]interface{})
+			right, _ := valid[j].(map[string]interface{})
+			if intFromAny(left["index"]) > intFromAny(right["index"]) {
+				valid[j-1], valid[j] = valid[j], valid[j-1]
+			}
+		}
+	}
+	return valid
+}
+
+func cloneToolCall(src map[string]interface{}) map[string]interface{} {
+	dst := make(map[string]interface{}, len(src))
+	for k, v := range src {
+		if k == "function" {
+			if fn, ok := v.(map[string]interface{}); ok {
+				fnCopy := make(map[string]interface{}, len(fn))
+				for fk, fv := range fn {
+					fnCopy[fk] = fv
+				}
+				dst[k] = fnCopy
+				continue
+			}
+		}
+		dst[k] = v
+	}
+	return dst
+}
+
+func intFromAny(v interface{}) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	case int64:
+		return int(n)
+	case json.Number:
+		i, _ := n.Int64()
+		return int(i)
+	}
+	return 0
 }
 
 // chatRequest 是一次对话请求的关键字段。

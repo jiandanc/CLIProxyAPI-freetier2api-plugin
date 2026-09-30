@@ -37,12 +37,14 @@ func TestAuthParseVendorOwnershipDiscrimination(t *testing.T) {
 		// 既有供应商：仍按各自约定认领。
 		{"workbuddy nested", "workbuddycn-u1.json", "", `{"account":{"uid":"u1"},"auth":{"accessToken":"at","realm":"cn"}}`, true},
 		{"qoder pt token", "qodercn-u1.json", "", `{"token":"pt-abc"}`, true},
-		// 新增供应商：ZCode, TraeSOLO, Trae国内版/国际版, CodeArts
+		// 新增供应商：ZCode, TraeSOLO, Trae国内版/国际版, CodeArts, MiniMax Code
 		{"zcode filename", "zcode-key1.json", "", `{"api_key":"abc.123"}`, true},
 		{"traesolo filename", "traesolo-user1.json", "", `{"accessToken":"at_123","refreshToken":"rt_456"}`, true},
 		{"traecn filename", "traecn-user1.json", "", `{"accessToken":"at_123"}`, true},
 		{"traeglobal filename", "traeglobal-user1.json", "", `{"accessToken":"at_123","region":"global"}`, true},
 		{"codearts filename", "codearts-user1.json", "", `{"access_key_id":"ak","secret_access_key":"sk"}`, true},
+		{"minimaxcodecn filename", "minimaxcodecn-user1.json", "", `{"token":"at_123"}`, true},
+		{"minimaxcodeglobal filename", "minimaxcodeglobal-user1.json", "", `{"token":"at_123","region":"global"}`, true},
 
 		// 跨供应商误吞防护：通用结构必须落在**正确**的供应商头上。
 		{"qoder pt token is qoder", "acc.json", "", `{"access_token":"pt-abc"}`, true},

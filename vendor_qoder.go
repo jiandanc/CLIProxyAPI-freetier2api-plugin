@@ -119,11 +119,16 @@ func newQoderCoreCredential(native *qoder.Credential, vendorID, fileName string)
 	}
 	// Qoder 的 PAT 是长期凭证，没有过期时间概念；设备令牌同理。
 	// 因此 ExpiresAt 留 0（表示未知），刷新由宿主按 NextRefreshAfter 驱动。
+	//
+	// UID 直接用文件名（去 .json 后缀）：凭证里没有可靠标识——
+	// device_token 凭证根本没有 email 字段，而签到记录要靠 UID 落状态，
+	// 取不到 UID 就会永远显示「未签到」。文件名由登录流程按供应商命名，天然唯一。
+	uid := strings.TrimSuffix(strings.TrimSpace(fileName), ".json")
 	return &core.Credential{
 		VendorID:     vendorID,
 		Region:       string(native.Region),
 		Label:        label,
-		UID:          native.Email,
+		UID:          uid,
 		Token:        native.Token,
 		RefreshToken: native.RefreshToken,
 		AuthMode:     "oauth",
