@@ -5,6 +5,8 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -646,5 +648,123 @@ func TestFormatSSEChunk(t *testing.T) {
 	}
 	if out = formatSSEChunk([]byte("   \n\r  ")); out != nil {
 		t.Errorf("expected nil for whitespace payload, got %q", string(out))
+	}
+}
+
+// TestDisabledModelsConfig 验证 YAML 配置 disabled_models 的解析格式与生效行为。
+func TestDisabledModelsConfig(t *testing.T) {
+	// 1. 块列表写法，含三种前缀形态
+	yamlBlock := []byte(`
+enabled_realms: cn,global
+disabled_models:
+  - workbuddycn:glm-5.2
+  - cn:deepseek-v4-pro
+  - qwen-3.5-plus
+`)
+	cfg, errDecode := decodeConfig(yamlBlock)
+	if errDecode != nil {
+		t.Fatalf("decodeConfig failed: %v", errDecode)
+	}
+	if errApply := applyConfig(cfg); errApply != nil {
+		t.Fatalf("applyConfig failed: %v", errApply)
+	}
+
+	// 厂商限定只影响该厂商
+	if !isModelDisabled("workbuddycn", "glm-5.2") {
+		t.Fatal("workbuddycn:glm-5.2 must be disabled")
+	}
+	if isModelDisabled("workbuddyglobal", "glm-5.2") {
+		t.Fatal("workbuddyglobal:glm-5.2 should NOT be disabled")
+	}
+	// 区域别名展开到该区域所有厂商
+	if !isModelDisabled("workbuddycn", "deepseek-v4-pro") {
+		t.Fatal("workbuddycn:deepseek-v4-pro must be disabled by cn: prefix")
+	}
+	if isModelDisabled("workbuddyglobal", "deepseek-v4-pro") {
+		t.Fatal("workbuddyglobal:deepseek-v4-pro should NOT be disabled by cn: prefix")
+	}
+	// 裸名对所有厂商生效
+	if !isModelDisabled("workbuddycn", "qwen-3.5-plus") || !isModelDisabled("workbuddyglobal", "qwen-3.5-plus") {
+		t.Fatal("bare name must be disabled on all vendors")
+	}
+
+	// 2. 流式列表写法
+	yamlFlow := []byte(`
+enabled_realms: cn,global
+disabled_models: [workbuddyglobal:glm-5.2]
+`)
+	cfgFlow, errDecodeFlow := decodeConfig(yamlFlow)
+	if errDecodeFlow != nil {
+		t.Fatalf("decode flow config failed: %v", errDecodeFlow)
+	}
+	if errApply := applyConfig(cfgFlow); errApply != nil {
+		t.Fatalf("applyConfig flow failed: %v", errApply)
+	}
+	if !isModelDisabled("workbuddyglobal", "glm-5.2") {
+		t.Fatal("flow list workbuddyglobal:glm-5.2 must be disabled")
+	}
+	// 新配置整体替换：上一轮的 cn 限定不再生效
+	if isModelDisabled("workbuddycn", "glm-5.2") {
+		t.Fatal("workbuddycn:glm-5.2 should not be disabled after reconfigure")
+	}
+}
+
+// TestConfigAndStateDisabledModelsUnion 验证配置声明与页面操作取并集：
+// 页面「启用」不能放开配置里声明的禁用项。
+func TestConfigAndStateDisabledModelsUnion(t *testing.T) {
+	installFakeHost(t)
+	cfg := setupTestPlugin(t)
+	cfg.DisabledModels = []string{"cn:glm-5.2"}
+	if errApply := applyConfig(cfg); errApply != nil {
+		t.Fatalf("applyConfig failed: %v", errApply)
+	}
+	if !isModelDisabled("workbuddycn", "glm-5.2") {
+		t.Fatal("config-declared disable must take effect")
+	}
+
+	// 页面尝试启用同一模型：配置声明仍在，禁用不放开。
+	handleModelsToggle(pluginapi.ManagementRequest{
+		Method: "POST", Path: "/models/toggle",
+		Body: []byte(`{"models":["cn:glm-5.2"],"disabled":false}`),
+	})
+	if !isModelDisabled("workbuddycn", "glm-5.2") {
+		t.Fatal("page-side enable must NOT lift a config-declared disable")
+	}
+
+	// 页面禁用另一个模型：两个来源并存，都被拦截。
+	handleModelsToggle(pluginapi.ManagementRequest{
+		Method: "POST", Path: "/models/toggle",
+		Body: []byte(`{"models":["workbuddycn:glm-5.3"],"disabled":true}`),
+	})
+	if !isModelDisabled("workbuddycn", "glm-5.3") {
+		t.Fatal("page-side disable must take effect")
+	}
+	if !isModelDisabled("workbuddycn", "glm-5.2") {
+		t.Fatal("config disable must survive the page operation")
+	}
+}
+
+// TestDefaultStateDirFallback 验证存在 ~/.cli-proxy-api 时优先用其子目录。
+func TestDefaultStateDirFallback(t *testing.T) {
+	tempHome := t.TempDir()
+	t.Setenv("HOME", tempHome)
+	t.Setenv("FREETIER2API_PLUGIN_HOME", "")
+
+	// 1. 无 ~/.cli-proxy-api → 回退 ~/.freetier2api-plugin
+	dir1 := defaultStateDir()
+	want1 := filepath.Join(tempHome, ".freetier2api-plugin")
+	if dir1 != want1 {
+		t.Fatalf("defaultStateDir = %q, want %q", dir1, want1)
+	}
+
+	// 2. 存在 ~/.cli-proxy-api（Docker 挂载场景）→ 用其下 freetier2api 子目录
+	cpaDir := filepath.Join(tempHome, ".cli-proxy-api")
+	if errMkdir := os.MkdirAll(cpaDir, 0o755); errMkdir != nil {
+		t.Fatalf("create temp cpa dir: %v", errMkdir)
+	}
+	dir2 := defaultStateDir()
+	want2 := filepath.Join(cpaDir, "freetier2api")
+	if dir2 != want2 {
+		t.Fatalf("defaultStateDir with cpa dir = %q, want %q", dir2, want2)
 	}
 }

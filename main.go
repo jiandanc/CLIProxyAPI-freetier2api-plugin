@@ -35,7 +35,7 @@ import (
 var pluginVersion = defaultPluginVersion
 
 // defaultPluginVersion 是未注入时的版本号。
-const defaultPluginVersion = "0.0.7"
+const defaultPluginVersion = "0.0.8"
 
 // effectivePluginVersion 返回对外上报的版本号。
 //
@@ -259,6 +259,8 @@ func pluginRegistration() registration {
 					Description: "启用的域（逗号分隔）：cn 国内 / global 国际。默认 cn,global。只留 cn 时 global 账号不会被路由到。"},
 				{Name: "extra_models", Type: pluginapi.ConfigFieldTypeString,
 					Description: "额外注册的模型名（不含 cn: / global: 前缀），逗号分隔。"},
+				{Name: "disabled_models", Type: pluginapi.ConfigFieldTypeString,
+					Description: "禁用的模型列表（支持厂商限定如 workbuddycn:deepseek-v4-pro、区域别名如 cn:deepseek-v4-pro 或裸模型名），逗号分隔或 YAML 列表。与控制台页面的启用/禁用按钮取并集：配置声明适合批量管理，页面适合临时调整。"},
 				{Name: "state_dir", Type: pluginapi.ConfigFieldTypeString,
 					Description: "插件状态目录（机器盐、模型缓存、任务记录、日志），默认 ~/.freetier2api-plugin。"},
 				{Name: "log_level", Type: pluginapi.ConfigFieldTypeEnum, EnumValues: []string{"debug", "info", "error"},

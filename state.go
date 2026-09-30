@@ -130,7 +130,8 @@ func loadState(cfg pluginConfig) (*pluginState, error) {
 	}
 	normalizeState(&loaded)
 	stateCache = &loaded
-	reloadDisabledModelCache(loaded.DisabledModels)
+	// 锁内只做纯计算合并（不调用 refreshDisabledModelCache：它会重入 stateMu）。
+	reloadDisabledModelCache(mergeDisabledLists(loaded.DisabledModels))
 	return stateCache, nil
 }
 

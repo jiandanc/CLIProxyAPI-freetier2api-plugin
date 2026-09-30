@@ -364,7 +364,8 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 | --- | --- | --- | --- |
 | `enabled_realms` | string | `cn,global` | 启用的区域；只留 `cn` 时国际版账号不会被路由到 |
 | `extra_models` | string | 空 | 额外注册的模型名，逗号或空格分隔；可带 `vendor:` 前缀限定 |
-| `state_dir` | string | `~/.freetier2api-plugin` | 状态目录（机器盐、模型缓存、任务记录、日志） |
+| `disabled_models` | string / list | 空 | 禁用的模型清单，逗号分隔或 YAML 列表；支持厂商限定（`workbuddycn:glm-5.2`）、区域别名（`cn:glm-5.2`）或裸名（`qwen-3.5-plus`）。与控制台页面按钮取并集 |
+| `state_dir` | string | `~/.freetier2api-plugin` | 状态目录（机器盐、模型缓存、任务记录、日志）；若检测到 `~/.cli-proxy-api` 则默认用其下的 `freetier2api` 子目录（适配 Docker 挂载卷） |
 | `log_level` | enum | `info` | `debug` / `info` / `error` |
 | `log_to_file` | bool | `false` | 是否把日志写入 `<state_dir>/logs` |
 | `prompt_mode` | enum | `passthrough` | `passthrough` 透传 / `custom` 替换 / `append` 追加（WorkBuddy） |

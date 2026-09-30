@@ -381,6 +381,9 @@ func buildConfigYAML(cfg pluginConfig) []byte {
 	fmt.Fprintf(&builder, "state_dir: %q\n", cfg.StateDir)
 	fmt.Fprintf(&builder, "log_level: %s\n", cfg.LogLevel)
 	fmt.Fprintf(&builder, "enabled_realms: %s\n", strings.Join(cfg.EnabledRealms, ","))
+	if len(cfg.DisabledModels) > 0 {
+		fmt.Fprintf(&builder, "disabled_models: %s\n", strings.Join(cfg.DisabledModels, ","))
+	}
 	if cfg.PromptMode != "" {
 		fmt.Fprintf(&builder, "prompt_mode: %s\n", cfg.PromptMode)
 	}

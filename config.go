@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -28,6 +29,10 @@ type pluginConfig struct {
 	EnabledRealms []string
 	// ExtraModels 是额外注册的模型名（不含 realm 前缀），用于手打绕过动态目录。
 	ExtraModels []string
+	// DisabledModels 是配置文件声明的禁用模型（支持 vendorID:、区域别名或裸名）。
+	// 与控制台页面的启用/禁用按钮（写入状态文件）取并集：配置适合声明式批量管理，
+	// 页面适合临时调整；页面无法放开配置里声明的禁用项，需改配置。
+	DisabledModels []string
 	// StateDir 是插件状态目录（机器盐、模型缓存、任务记录、日志）。
 	StateDir string
 	// LogLevel 控制插件日志：debug / info / error。
@@ -106,8 +111,9 @@ const (
 // 写成块列表（`- item`）或流式列表（`[a, b]`）都很自然。不做归一化的话，
 // 这两种写法会被静默忽略（配置写进去了、插件看不见）。
 var listValuedConfigKeys = map[string]bool{
-	"enabled_realms": true,
-	"extra_models":   true,
+	"enabled_realms":  true,
+	"extra_models":    true,
+	"disabled_models": true,
 }
 
 func defaultPluginConfig() pluginConfig {
@@ -128,14 +134,20 @@ func defaultPluginConfig() pluginConfig {
 	}
 }
 
-// defaultStateDir 推断默认状态目录：环境变量 > 用户主目录 > 进程临时目录。
+// defaultStateDir 推断默认状态目录：环境变量 > 宿主凭证目录子路径 > 用户主目录 > 进程临时目录。
 //
 // 三级回退是为了让插件在只读 HOME（容器、CI）里也能起来。
+// 优先检测 ~/.cli-proxy-api：Docker 部署里它通常是宿主的挂载卷，
+// 状态落在这里可随容器重建保留，避免每次重建丢签到与任务记录。
 func defaultStateDir() string {
 	if env := strings.TrimSpace(os.Getenv(stateDirEnvOverride)); env != "" {
 		return env
 	}
 	if home, errHome := os.UserHomeDir(); errHome == nil && strings.TrimSpace(home) != "" {
+		cpaDir := filepath.Join(home, ".cli-proxy-api")
+		if info, errStat := os.Stat(cpaDir); errStat == nil && info.IsDir() {
+			return filepath.Join(cpaDir, "freetier2api")
+		}
 		return filepath.Join(home, defaultStateDirName)
 	}
 	return filepath.Join(os.TempDir(), defaultStateDirName)
@@ -190,6 +202,8 @@ func applyConfigLine(cfg *pluginConfig, key, value string) error {
 		cfg.EnabledRealms = realms
 	case "extra_models":
 		cfg.ExtraModels = splitList(stripInlineList(value))
+	case "disabled_models":
+		cfg.DisabledModels = parseDisabledModels(value)
 	case "zen_base_url":
 		cfg.ZenBaseURL = strings.TrimSpace(value)
 	case "cline_base_url":
@@ -407,6 +421,29 @@ func splitList(raw string) []string {
 	return out
 }
 
+// parseDisabledModels 解析配置里的 disabled_models（列表或逗号/空白分隔）。
+//
+// 每一项都经 expandModelKey 展开：区域别名（cn:glm-5.2）会展开成该区域
+// 每个供应商的键，因此配置里写别名与逐个写供应商等价。结果去重排序，
+// 保证相同配置产出相同顺序（便于比对与展示）。
+func parseDisabledModels(raw string) []string {
+	items := splitList(stripInlineList(raw))
+	set := make(map[string]bool, len(items)*2)
+	for _, item := range items {
+		for _, key := range expandModelKey(item) {
+			if key != "" {
+				set[key] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for key := range set {
+		out = append(out, key)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // parseBool 解析布尔值，无法解析时保留 fallback。
 func parseBool(raw string, fallback bool) bool {
 	trimmed := strings.ToLower(strings.TrimSpace(raw))
@@ -484,6 +521,7 @@ func applyConfig(cfg pluginConfig) error {
 	}
 	applyPromptConfig(cfg)
 	storeConfig(cfg)
+	refreshDisabledModelCache()
 	return nil
 }
 

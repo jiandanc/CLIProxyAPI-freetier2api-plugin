@@ -6,6 +6,13 @@ package main
 //   - 国内/海外账号可对同名模型独立禁用；
 //   - 宿主不会把请求路由到被禁用的域；若两域均被禁用，宿主直接返回 model_not_found；
 //   - 请求执行层通过内存读写锁缓存进行轻量零锁校验。
+//
+// 禁用清单有两个来源，取**并集**：
+//   - config.yaml 的 plugins.configs.freetier2api.disabled_models（声明式，批量管理）；
+//   - 控制台页面的「禁用选中/启用选中」按钮，写入状态文件 disabled_models（临时调整）。
+//
+// 页面无法放开配置里声明的禁用项——配置是声明式的最终意图；要放开就改配置。
+// 两个来源都变化时都调用 refreshDisabledModelCache 重算并集，避免互相覆盖。
 
 import (
 	"encoding/json"
@@ -27,15 +34,39 @@ var (
 	disabledCacheSet = map[string]bool{}
 )
 
-// reloadDisabledModelCache 刷新内存中的禁用模型查询集合。
+// mergeDisabledLists 合并两个来源的禁用清单：配置声明 + 状态文件记录。
+//
+// 只做纯计算、不取任何锁：调用方可能已经持有 stateMu（loadState、mutateState
+// 的回调内），在那里读 snapshotState() 会因 stateMu 不可重入而自锁。
+func mergeDisabledLists(stateDisabled []string) []string {
+	merged := make([]string, 0, len(stateDisabled)+8)
+	merged = append(merged, loadedConfig().DisabledModels...)
+	merged = append(merged, stateDisabled...)
+	return merged
+}
+
+// refreshDisabledModelCache 重算禁用集合：配置声明 ∪ 状态文件记录。
+//
+// 配置与状态各自独立变化（reconfigure / 页面操作），任何一处变化都必须
+// 走这个入口重算，否则后写的一方会把另一方冲掉。
+// 调用方**不得**持有 stateMu（内部会读 snapshotState）。
+func refreshDisabledModelCache() {
+	reloadDisabledModelCache(mergeDisabledLists(snapshotState().DisabledModels))
+}
+
+// reloadDisabledModelCache 用给定清单整体替换内存中的禁用模型查询集合。
+//
+// 每一项都经 expandModelKey 归一：调用方可能给出区域别名（cn:glm-5.2）或
+// 未展开的历史数据，而查询侧只按规范键（vendorID:裸名）与裸名匹配。
 func reloadDisabledModelCache(disabled []string) {
 	disabledCacheMu.Lock()
 	defer disabledCacheMu.Unlock()
 	m := make(map[string]bool, len(disabled)*2)
 	for _, id := range disabled {
-		trimmed := strings.TrimSpace(id)
-		if trimmed != "" {
-			m[trimmed] = true
+		for _, key := range expandModelKey(id) {
+			if key != "" {
+				m[key] = true
+			}
 		}
 	}
 	disabledCacheSet = m
@@ -159,8 +190,12 @@ func handleModelsToggle(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		}
 		sort.Strings(next)
 		state.DisabledModels = next
+		// 锁内只重算内存集合（不含配置并集，避免重入 stateMu）；
+		// mutateState 返回后再刷新完整并集。
 		reloadDisabledModelCache(next)
 	})
+	// 配置里声明的禁用项不会被这次页面操作放开：刷新并集。
+	refreshDisabledModelCache()
 
 	logger.Info("models %s: %d 个（%s）", toggleVerb(body.Disabled), len(targets),
 		strings.Join(targets, ", "))
@@ -181,29 +216,38 @@ func handleModelsToggle(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 //
 // 返回空字符串表示输入无效（调用方应忽略）。
 func normalizeModelKeyForStorage(modelID string) string {
+	return strings.Join(expandModelKey(modelID), "\n")
+}
+
+// expandModelKey 把待禁用的模型标识展开成查询键：
+//   - 裸名（glm-5.2）—— 返回裸名（对所有供应商生效）；
+//   - 供应商 ID 前缀（workbuddycn:glm-5.2）—— 返回规范 vendorKey；
+//   - 区域别名前缀（cn:glm-5.2）—— 展开成该区域下所有供应商的 vendorKey。
+//
+// 区域别名展开不出任何供应商时退回裸名：这样配置里写了别名但供应商尚未注册
+// （例如该区域被 enabled_realms 关掉）时，禁用意图依然保留。
+func expandModelKey(modelID string) []string {
 	trimmed := strings.TrimSpace(modelID)
 	if trimmed == "" {
-		return ""
+		return nil
 	}
 	prefix, bare := core.SplitModelID(trimmed)
 	if prefix == "" {
-		return bare
+		return []string{bare}
 	}
 	if _, okVendor := core.VendorByID(prefix); okVendor {
-		return core.ModelKeyFor(prefix, bare)
+		return []string{core.ModelKeyFor(prefix, bare)}
 	}
-	// 区域别名：展开成该区域下每个供应商的键。多个键用换行分隔，
-	// 由保存逻辑拆开（这里返回单个字符串以保持签名简单）。
 	keys := make([]string, 0, 4)
 	for _, vendor := range core.Vendors() {
 		if vendor.Region() == prefix {
 			keys = append(keys, core.ModelKeyFor(vendor.ID(), bare))
 		}
 	}
-	if len(keys) == 0 {
-		return ""
+	if len(keys) > 0 {
+		return keys
 	}
-	return strings.Join(keys, "\n")
+	return []string{bare}
 }
 
 func toggleVerb(disabled bool) string {
