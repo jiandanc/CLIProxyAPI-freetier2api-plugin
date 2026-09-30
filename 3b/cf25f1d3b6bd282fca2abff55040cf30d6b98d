@@ -1,0 +1,122 @@
+plugin_test.go
+  s_c94277640c5b1c::t_6dbc9de492e028 429-431
+  s_c94277640c5b1c::t_bd23cc16b5fb82 626
+internal/vendors/minimaxcode/credential_test.go
+  s_188d5f2f214db5::t_966d4c4929a720 1-79
+internal/vendors/opencodezen/chat.go
+  s_c94277640c5b1c::t_cd58531864db38 220,222,242,269,305,307,314-315,319,321-325
+  s_a6486448bfebff::t_0468adeddaad7d 5-10,13,18,21,23-24,37,45-62,82-87,108-113,126-219,221,223-241,243-268,271-304,308-312,316,436-441,443-460,465,477
+internal/vendors/minimaxcode/client.go
+  s_188d5f2f214db5::t_ccb8e081a8b758 1-472
+internal/vendors/opencodezen/errors.go
+  s_a6486448bfebff::t_235fd3fcec2acb 55-62,66
+internal/vendors/minimaxcode/login.go
+  s_188d5f2f214db5::t_cbfc0dc2ffdc81 305
+  s_188d5f2f214db5::t_fc1ed4e7a9c0a9 1-304,306-322
+plugin_vendor_test.go
+  s_188d5f2f214db5::t_108c21782e9aa2 40,46-47
+internal/vendors/qoder/bridge/chat.go
+  s_c94277640c5b1c::t_07977630457d65 58,79,104,124,138,146
+  s_c94277640c5b1c::t_56f8fd64929cbb 12
+internal/vendors/minimaxcode/endpoints.go
+  s_188d5f2f214db5::t_c3062039a4d2e3 1-105
+internal/vendors/minimaxcode/prompt_test.go
+  s_188d5f2f214db5::t_0b2a90f41e2e60 1-77
+internal/vendors/minimaxcode/quota.go
+  s_188d5f2f214db5::t_8d64c010945d24 1-122
+internal/vendors/minimaxcode/refresh.go
+  s_188d5f2f214db5::t_37ed7f3876603f 1-80
+vendor_qoder.go
+  s_a6486448bfebff::t_cea0f9844915cc 131
+  s_a6486448bfebff::t_047ba9dadb4893 122-126
+internal/vendors/qoder/bridge/payload_test.go
+  s_c94277640c5b1c::t_b6e9c58ae0cedb 1-60
+models.go
+  s_188d5f2f214db5::t_b5cf750cc23f3e 301-304
+  s_188d5f2f214db5::t_05c243a9121bc2 24
+internal/vendors/minimaxcode/checkin.go
+  s_188d5f2f214db5::t_8f5b0d77b546f8 1-105
+internal/vendors/minimaxcode/signing_test.go
+  s_188d5f2f214db5::t_d96f4ac6b599e9 1-59
+internal/vendors/minimaxcode/signing.go
+  s_188d5f2f214db5::t_950ea744b8ac2d 1-59
+ui.go
+  s_a6486448bfebff::t_960c91c50069cd 76,80
+  s_a6486448bfebff::t_3e12b80b4ad8cc 691,711,713
+  s_a6486448bfebff::t_d07f00fbab51ac 564,566-571
+  s_a6486448bfebff::t_0c523db6cea219 530
+  s_a6486448bfebff::t_ddb5db8c32a268 1216-1218,1221-1233
+  s_a6486448bfebff::t_68eed9597b0758 332-335,337,340-346,350-352
+  s_a6486448bfebff::t_354326b5c54e95 1197,1208-1209,1211
+  s_a6486448bfebff::t_9a3c4343cc3a21 1236,1240-1241
+  s_a6486448bfebff::t_ddbc79b6e47bc9 1153
+  s_a6486448bfebff::t_89cab547127f32 589-590
+internal/vendors/minimaxcode/catalog.go
+  s_188d5f2f214db5::t_f85163a8221ff7 1-106
+vendor_minimaxcode.go
+  s_188d5f2f214db5::t_c726f43f8f1f7d 1-218
+main.go
+  s_c94277640c5b1c::t_6b9affa30b49c3 38
+executor.go
+  s_c94277640c5b1c::t_e59c3ff3013925 6
+  s_c94277640c5b1c::t_fbddc6b09e1d99 143-146
+  s_c94277640c5b1c::t_3653895d296e1a 140,142,154-173
+management.go
+  s_a6486448bfebff::t_ff2de4908a9c2b 70
+  s_a6486448bfebff::t_a4c1e140dd596c 570
+  s_a6486448bfebff::t_5a0c17c87def80 894-896
+  s_a6486448bfebff::t_f8d520f95b71e7 1142-1148,1165,1172,1187-1198
+  s_a6486448bfebff::t_8a14cd17ef7263 489-492
+internal/vendors/qoder/bridge/payload.go
+  s_c94277640c5b1c::t_54ab95bb8cfa2b 157-264
+  s_c94277640c5b1c::t_7a89a8c6555585 44,51,95,117,133
+  s_c94277640c5b1c::t_b379c32cde5291 52,85
+config.go
+  s_188d5f2f214db5::t_72c9fa38ff18af 78-81
+  s_188d5f2f214db5::t_daea5051e97510 197-200
+internal/vendors/minimaxcode/chat.go
+  s_188d5f2f214db5::t_ea28ab4c0e7054 1-324
+registry.json
+  s_c94277640c5b1c::t_6a9a756ed31b13 7,12
+internal/vendors/minimaxcode/prompt.go
+  s_188d5f2f214db5::t_8e08d2a58c8229 1-172
+internal/vendors/minimaxcode/credential.go
+  s_188d5f2f214db5::t_d85c0c4ff89c24 1-358
+README.md
+  s_188d5f2f214db5::t_927fb4cd460d1b 31-32
+  s_188d5f2f214db5::t_41472cd6bf95f2 52-53
+internal/vendors/opencodezen/catalog.go
+  s_a6486448bfebff::t_0b7e1c2fdb6983 120-122
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.45-trip",
+  "base_commit_sha": "3bcf25f1d3b6bd282fca2abff55040cf30d6b98d",
+  "prompts": {},
+  "sessions": {
+    "s_188d5f2f214db5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "51ec21cc-80c6-416d-969f-58c7e7b43a2b",
+        "model": "gemini-3.8-flash"
+      },
+      "human_author": "junpengchen <junpengchen@trip.com>"
+    },
+    "s_a6486448bfebff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d6ce20e0-b6ef-4499-bb46-029176cd6900",
+        "model": "hy4-preview"
+      },
+      "human_author": "junpengchen <junpengchen@trip.com>"
+    },
+    "s_c94277640c5b1c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bdc5164f-bc05-44ca-bfc0-fb912c9b0318",
+        "model": "unknown"
+      },
+      "human_author": "junpengchen <junpengchen@trip.com>"
+    }
+  }
+}
