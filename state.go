@@ -96,6 +96,18 @@ type pluginState struct {
 	// 被禁用的模型不再注册给宿主，客户端因此选不到、也请求不到。
 	DisabledModels []string `json:"disabled_models,omitempty"`
 
+	// ModelAliases 是模型别名表：<vendorID>:<官方模型 ID> → 对外别名。
+	// 别名即注册给宿主的对外 ID；出站前会还原成官方 ID（见 modelalias.go）。
+	ModelAliases map[string]string `json:"model_aliases,omitempty"`
+
+	// RestartPending 标记「已有模型变更，但宿主的模型注册表尚未刷新」。
+	//
+	// 为什么需要它：禁用/启用与别名改的是**状态文件**，宿主只在
+	// plugin.register / 配置重载时构建模型注册表，因此 /v1/models 的增删
+	// 要等下一次重载（重启宿主或触发一次配置重载）才生效——而调用拦截是即时的。
+	// 页面据此常驻提示用户，直到变更被应用（见 modelrestart.go）。
+	RestartPending bool `json:"restart_pending,omitempty"`
+
 	// Checkin 按账号 UID 记录签到状态。
 	Checkin map[string]checkinRecord `json:"checkin,omitempty"`
 	// Tasks 按「uid\x1f任务码」记录任务执行历史。
@@ -132,14 +144,16 @@ func loadState(cfg pluginConfig) (*pluginState, error) {
 	stateCache = &loaded
 	// 锁内只做纯计算合并（不调用 refreshDisabledModelCache：它会重入 stateMu）。
 	reloadDisabledModelCache(mergeDisabledLists(loaded.DisabledModels))
+	reloadModelAliasCache(loaded.ModelAliases)
 	return stateCache, nil
 }
 
 func newPluginState() *pluginState {
 	return &pluginState{
-		Version: stateVersion,
-		Checkin: map[string]checkinRecord{},
-		Tasks:   map[string]taskRecord{},
+		Version:      stateVersion,
+		Checkin:      map[string]checkinRecord{},
+		Tasks:        map[string]taskRecord{},
+		ModelAliases: map[string]string{},
 	}
 }
 
@@ -151,6 +165,9 @@ func normalizeState(state *pluginState) {
 	}
 	if state.Tasks == nil {
 		state.Tasks = map[string]taskRecord{}
+	}
+	if state.ModelAliases == nil {
+		state.ModelAliases = map[string]string{}
 	}
 }
 
@@ -191,6 +208,10 @@ func snapshotState() pluginState {
 	out.Tasks = make(map[string]taskRecord, len(stateCache.Tasks))
 	for key, value := range stateCache.Tasks {
 		out.Tasks[key] = value
+	}
+	out.ModelAliases = make(map[string]string, len(stateCache.ModelAliases))
+	for key, value := range stateCache.ModelAliases {
+		out.ModelAliases[key] = value
 	}
 	return out
 }

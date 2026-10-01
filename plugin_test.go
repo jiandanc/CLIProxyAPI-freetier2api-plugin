@@ -744,6 +744,149 @@ func TestConfigAndStateDisabledModelsUnion(t *testing.T) {
 	}
 }
 
+// TestModelAliasScopedAndRouting 验证别名的两条语义：
+//   - 别名是**供应商内**生效的对外 ID（同供应商内唯一、换绑旧模型）；
+//   - 出站时按供应商还原成官方 ID（跨供应商同名别名各自路由回自己的模型）。
+func TestModelAliasScopedAndRouting(t *testing.T) {
+	installFakeHost(t)
+	setupTestPlugin(t)
+
+	// 给两家供应商各绑一个同名别名：宿主会合并成一个 ID 并在两家间调度。
+	handleModelAlias(pluginapi.ManagementRequest{
+		Method: "POST", Path: "/models/alias",
+		Body: []byte(`{"model":"workbuddycn:glm-5.2","alias":"glm-max"}`),
+	})
+	handleModelAlias(pluginapi.ManagementRequest{
+		Method: "POST", Path: "/models/alias",
+		Body: []byte(`{"model":"qodercn:gmodel","alias":"glm-max"}`),
+	})
+
+	if got := modelAliasFor("workbuddycn", "glm-5.2"); got != "glm-max" {
+		t.Fatalf("workbuddycn alias = %q, want glm-max", got)
+	}
+	if got := modelAliasFor("qodercn", "gmodel"); got != "glm-max" {
+		t.Fatalf("qodercn alias = %q, want glm-max", got)
+	}
+	// 作用域是单个模型 ID：同供应商的其它模型不受影响。
+	if got := modelAliasFor("workbuddycn", "glm-5.3"); got != "" {
+		t.Fatalf("unrelated model alias = %q, want empty", got)
+	}
+
+	// 出站：同一别名按请求供应商还原成各自的官方 ID。
+	if got := resolveOutboundModel("workbuddycn", "glm-max"); got != "glm-5.2" {
+		t.Fatalf("resolveOutboundModel(workbuddycn) = %q, want glm-5.2", got)
+	}
+	if got := resolveOutboundModel("qodercn", "glm-max"); got != "gmodel" {
+		t.Fatalf("resolveOutboundModel(qodercn) = %q, want gmodel", got)
+	}
+	// 未设别名的名字原样返回（Qoder 等直接以上游 key 注册时无需翻译）。
+	if got := resolveOutboundModel("qodercn", "gmodel"); got != "gmodel" {
+		t.Fatalf("passthrough = %q, want gmodel", got)
+	}
+
+	// 同供应商内别名唯一：把别名换绑到另一个模型，旧绑定被清掉。
+	handleModelAlias(pluginapi.ManagementRequest{
+		Method: "POST", Path: "/models/alias",
+		Body: []byte(`{"model":"workbuddycn:glm-5.3","alias":"glm-max"}`),
+	})
+	if got := modelAliasFor("workbuddycn", "glm-5.2"); got != "" {
+		t.Fatalf("rebind must clear the old binding, got %q", got)
+	}
+	if got := resolveOutboundModel("workbuddycn", "glm-max"); got != "glm-5.3" {
+		t.Fatalf("after rebind resolveOutboundModel = %q, want glm-5.3", got)
+	}
+
+	// 清除别名（空串）恢复官方 ID。
+	handleModelAlias(pluginapi.ManagementRequest{
+		Method: "POST", Path: "/models/alias",
+		Body: []byte(`{"model":"workbuddycn:glm-5.3","alias":""}`),
+	})
+	if got := modelAliasFor("workbuddycn", "glm-5.3"); got != "" {
+		t.Fatalf("clear alias failed, got %q", got)
+	}
+}
+
+// TestModelAliasSwapRegistersAliasID 验证别名被当作模型的对外 ID 注册。
+func TestModelAliasSwapRegistersAliasID(t *testing.T) {
+	installFakeHost(t)
+	setupTestPlugin(t)
+
+	in := []pluginapi.ModelInfo{
+		{ID: "qmodel_38max", Name: "Qwen3.8-Max", DisplayName: "Qwen3.8-Max"},
+		{ID: "gmodel", Name: "GLM-5.3", DisplayName: "GLM-5.3"},
+	}
+	handleModelAlias(pluginapi.ManagementRequest{
+		Method: "POST", Path: "/models/alias",
+		Body: []byte(`{"model":"qodercn:qmodel_38max","alias":"qwen-max"}`),
+	})
+
+	out := applyModelAliases("qodercn", in)
+	if out[0].ID != "qwen-max" || out[0].Name != "qwen-max" || out[0].DisplayName != "qwen-max" {
+		t.Fatalf("aliased model must expose the alias as ID/Name: %+v", out[0])
+	}
+	// 未设别名的模型原样保留官方 ID。
+	if out[1].ID != "gmodel" || out[1].Name != "GLM-5.3" {
+		t.Fatalf("unaliased model must keep official ID: %+v", out[1])
+	}
+}
+
+// TestRewritePayloadModel 验证出站请求体里的 model 被改写成官方 ID。
+func TestRewritePayloadModel(t *testing.T) {
+	out := rewritePayloadModel([]byte(`{"model":"gmodel","messages":[]}`), "gm51model")
+	var decoded map[string]any
+	if errUnmarshal := json.Unmarshal(out, &decoded); errUnmarshal != nil {
+		t.Fatalf("decode rewritten payload: %v", errUnmarshal)
+	}
+	if decoded["model"] != "gm51model" {
+		t.Fatalf("payload model = %v, want gm51model", decoded["model"])
+	}
+
+	// 非法 JSON 原样返回（不让本地解析失败中断一次对话）。
+	bad := []byte(`not json`)
+	if got := rewritePayloadModel(bad, "gmodel"); string(got) != string(bad) {
+		t.Fatalf("invalid payload must pass through unchanged, got %q", string(got))
+	}
+}
+
+// TestModelChangeMarksRestartPending 验证禁用/别名变更会置「待生效」标记，
+// 且宿主重建模型注册表（applyModelCatalog）时自动清除它。
+func TestModelChangeMarksRestartPending(t *testing.T) {
+	installFakeHost(t)
+	cfg := setupTestPlugin(t)
+
+	if snapshotState().RestartPending {
+		t.Fatal("fresh state must not be restart-pending")
+	}
+
+	// 禁用模型：置位。
+	handleModelsToggle(pluginapi.ManagementRequest{
+		Method: "POST", Path: "/models/toggle",
+		Body: []byte(`{"models":["workbuddycn:glm-5.2"],"disabled":true}`),
+	})
+	if !snapshotState().RestartPending {
+		t.Fatal("toggle must mark restart-pending")
+	}
+
+	// 宿主重建注册表（register/reconfigure 路径）时清除。
+	applyModelCatalog(cfg)
+	if snapshotState().RestartPending {
+		t.Fatal("applyModelCatalog must clear restart-pending")
+	}
+
+	// 别名变更同样置位，且状态负载带上标记，页面据此常驻提示。
+	handleModelAlias(pluginapi.ManagementRequest{
+		Method: "POST", Path: "/models/alias",
+		Body: []byte(`{"model":"workbuddycn:glm-5.2","alias":"glm-max"}`),
+	})
+	if !snapshotState().RestartPending {
+		t.Fatal("alias change must mark restart-pending")
+	}
+	payload := buildStatusPayload(pluginapi.ManagementRequest{})
+	if payload["restart_pending"] != true {
+		t.Fatalf("status payload restart_pending = %v, want true", payload["restart_pending"])
+	}
+}
+
 // TestDefaultStateDirFallback 验证存在 ~/.cli-proxy-api 时优先用其子目录。
 func TestDefaultStateDirFallback(t *testing.T) {
 	tempHome := t.TempDir()

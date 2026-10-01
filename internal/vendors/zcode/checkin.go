@@ -1,271 +1,30 @@
 package zcode
 
-// 签到相关实现：实现 ZCode (Z.AI) Coding Plan 套餐领取与每日签到。
-// 参考：D:\Workspace\zcode2api\app\claim.py
+// 本文件实现 ZCode 的签到。
+//
+// ZCode 的「签到」实质是领取限时活动套餐（billing/preview → billing/claim），
+// 而上游对 billing/claim **强制要求 X-Aliyun-Captcha-Verify-Param**：
+//
+//	POST /api/v1/zcode-plan/billing/claim
+//	→ HTTP 400 {"code":3007,"msg":"captcha verify failed"}
+//
+// 该验证码是阿里云**无痕验证**（traceless）——SDK 在客户端静默采集浏览器与
+// 设备信号后由服务端判定风险，通过即回调下发 token。它**没有图片、滑块或
+// 字符**可供作答，因此无法用视觉模型代答；参考实现也实测过纯模拟环境
+// （happy-dom）路线，2026-09 起被上游以「unusual activity」全拒。唯一可行
+// 方案是真浏览器（需下载约 200MB 的补丁 Chromium），本插件不引入这种依赖。
+//
+// 因此 ZCode 与 Cline / OpenCode ZEN 同属「无签到活动」的供应商：与其让
+// 页面提供一个点了必然失败的动作，不如如实声明不支持——控制台会按
+// 「无签到活动」展示（见 ui.go 的签到列渲染）。
+//
+// 额度查询**不受影响**：billing/current 与 billing/balance 不需要验证码，
+// 见 quota.go。
+//
+// 保留本文件而不是删除：所有供应商的签到能力都叫 checkin.go，新增供应商时
+// 照抄文件名即可，不必先确认「这家有没有这个功能」。
 
-import (
-	"bytes"
-	"context"
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"sort"
-	"strings"
-	"time"
+import "errors"
 
-	"freetier2api-plugin/internal/httpx"
-)
-
-// SupportsCheckin 报告本供应商是否支持签到（ZCode 支持领取每日 Coding Plan）。
-func SupportsCheckin() bool {
-	return true
-}
-
-type CheckinOutcome struct {
-	Already bool
-	Credit  int64
-	Message string
-}
-
-// Checkin 执行 Coding Plan 套餐领取。
-func Checkin(ctx context.Context, cred *Credential) (*CheckinOutcome, error) {
-	if cred == nil {
-		return nil, fmt.Errorf("credential is nil")
-	}
-	if cred.JWTToken == "" && cred.APIKey == "" {
-		return nil, fmt.Errorf("zcode credential missing token")
-	}
-
-	client := httpx.Client(ctx, 30*time.Second)
-
-	// 1. 上报激活事件（模拟桌面端日活信号）
-	_ = reportActivation(ctx, client, cred)
-
-	// 2. 查询可领取的套餐
-	plans, errPreview := previewPlans(ctx, client, cred)
-	if errPreview != nil {
-		return nil, errPreview
-	}
-	if len(plans) == 0 {
-		return &CheckinOutcome{
-			Already: true,
-			Message: "今日无可领取的 Coding Plan 套餐活动",
-		}, nil
-	}
-
-	// 选优先级最高的套餐
-	bestPlan := plans[0]
-
-	// 3. 提交领取
-	outcome, errClaim := claimPlan(ctx, client, cred, bestPlan.PlanID, bestPlan.Name)
-	if errClaim != nil {
-		return nil, errClaim
-	}
-	return outcome, nil
-}
-
-type PlanInfo struct {
-	PlanID   string
-	Name     string
-	Priority int
-}
-
-func previewPlans(ctx context.Context, client *http.Client, cred *Credential) ([]PlanInfo, error) {
-	url := fmt.Sprintf("%s%s?app_version=%s&platform=darwin-arm64", DefaultZCodeOrigin, PathBillingPreview, ClientAppVersion)
-	req, errReq := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if errReq != nil {
-		return nil, errReq
-	}
-	applyBillingHeaders(req, cred)
-
-	resp, errDo := client.Do(req)
-	if errDo != nil {
-		return nil, fmt.Errorf("preview request failed: %w", errDo)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, errRead := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if errRead != nil {
-		return nil, errRead
-	}
-	if resp.StatusCode >= 400 {
-		return nil, Classify(resp.StatusCode, string(body))
-	}
-
-	var data struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-		Data struct {
-			Plans []struct {
-				PlanID   string `json:"plan_id"`
-				Name     string `json:"name"`
-				Priority int    `json:"priority"`
-			} `json:"plans"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &data); err != nil {
-		return nil, fmt.Errorf("decode preview response: %w", err)
-	}
-	if data.Code != 0 {
-		return nil, fmt.Errorf("preview error: code=%d msg=%s", data.Code, data.Msg)
-	}
-
-	var plans []PlanInfo
-	for _, p := range data.Data.Plans {
-		if strings.TrimSpace(p.PlanID) == "" {
-			continue
-		}
-		plans = append(plans, PlanInfo{
-			PlanID:   p.PlanID,
-			Name:     p.Name,
-			Priority: p.Priority,
-		})
-	}
-
-	sort.Slice(plans, func(i, j int) bool {
-		return plans[i].Priority > plans[j].Priority
-	})
-
-	return plans, nil
-}
-
-func claimPlan(ctx context.Context, client *http.Client, cred *Credential, planID, planName string) (*CheckinOutcome, error) {
-	reqBody, _ := json.Marshal(map[string]string{"plan_id": planID})
-	req, errReq := http.NewRequestWithContext(ctx, http.MethodPost, DefaultZCodeOrigin+PathBillingClaim, bytes.NewReader(reqBody))
-	if errReq != nil {
-		return nil, errReq
-	}
-	applyBillingHeaders(req, cred)
-
-	resp, errDo := client.Do(req)
-	if errDo != nil {
-		return nil, fmt.Errorf("claim request failed: %w", errDo)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, errRead := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if errRead != nil {
-		return nil, errRead
-	}
-
-	var res struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-	}
-	_ = json.Unmarshal(body, &res)
-
-	switch res.Code {
-	case 0:
-		name := planName
-		if name == "" {
-			name = planID
-		}
-		return &CheckinOutcome{
-			Already: false,
-			Message: fmt.Sprintf("签到成功：已领取套餐「%s」", name),
-		}, nil
-	case 1003:
-		return &CheckinOutcome{
-			Already: true,
-			Message: "今天已经签到过了（该套餐已领取过）",
-		}, nil
-	case 1005:
-		return &CheckinOutcome{
-			Already: true,
-			Message: "今日领取名额已用完",
-		}, nil
-	case 1002:
-		return &CheckinOutcome{
-			Already: true,
-			Message: "活动暂未开放或已结束",
-		}, nil
-	default:
-		msg := res.Msg
-		if msg == "" {
-			msg = string(body)
-		}
-		return nil, fmt.Errorf("领取失败 (%d): %s", res.Code, msg)
-	}
-}
-
-func reportActivation(ctx context.Context, client *http.Client, cred *Credential) error {
-	userID := extractUserIDFromJWT(cred.JWTToken)
-	if userID == "" {
-		return nil
-	}
-
-	events := []string{"app_launch", "app_daily_active"}
-	for _, elem := range events {
-		body, _ := json.Marshal(map[string]any{
-			"element":           elem,
-			"user_id":           userID,
-			"screen_resolution": "2560x1440",
-		})
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, DefaultZCodeOrigin+PathEventReport, bytes.NewReader(body))
-		if err == nil {
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("User-Agent", ClientUA)
-			resp, errDo := client.Do(req)
-			if errDo == nil {
-				_ = resp.Body.Close()
-			}
-		}
-	}
-	return nil
-}
-
-func applyBillingHeaders(req *http.Request, cred *Credential) {
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", ClientUA)
-	req.Header.Set("HTTP-Referer", DefaultZCodeOrigin)
-	req.Header.Set("X-Title", "Z Code@electron")
-	req.Header.Set("X-ZCode-App-Version", ClientAppVersion)
-	req.Header.Set("X-Platform", "darwin-arm64")
-	req.Header.Set("X-Release-Channel", "stable")
-	req.Header.Set("X-Client-Language", "zh-CN")
-	req.Header.Set("X-Client-Timezone", "Asia/Shanghai")
-
-	devMID := cred.DeviceMID
-	if devMID == "" {
-		devMID = "default-zcode-dev"
-	}
-	req.Header.Set("X-Device-Mid", devMID)
-	req.Header.Set("x-request-id", randomUUID())
-
-	if cred.JWTToken != "" {
-		req.Header.Set("Authorization", "Bearer "+cred.JWTToken)
-	} else if cred.APIKey != "" {
-		req.Header.Set("x-api-key", cred.APIKey)
-	}
-}
-
-func extractUserIDFromJWT(token string) string {
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return ""
-	}
-	seg := parts[1]
-	if pad := len(seg) % 4; pad != 0 {
-		seg += strings.Repeat("=", 4-pad)
-	}
-	data, err := base64.URLEncoding.DecodeString(seg)
-	if err != nil {
-		data, err = base64.RawURLEncoding.DecodeString(parts[1])
-		if err != nil {
-			return ""
-		}
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return ""
-	}
-	if uid, ok := payload["user_id"].(string); ok && uid != "" {
-		return uid
-	}
-	if sub, ok := payload["sub"].(string); ok && sub != "" {
-		return sub
-	}
-	return ""
-}
+// ErrCheckinUnsupported 表示本供应商没有签到活动。
+var ErrCheckinUnsupported = errors.New("zcode does not provide a daily check-in")

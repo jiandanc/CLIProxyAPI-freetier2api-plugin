@@ -24,6 +24,7 @@ import (
 	"freetier2api-plugin/internal/vendors/minimaxcode"
 	"freetier2api-plugin/internal/vendors/opencodezen"
 	"freetier2api-plugin/internal/vendors/workbuddy"
+	"freetier2api-plugin/internal/vendors/zcode"
 )
 
 // staticModelRPCRequest 与宿主的 model.static 请求对齐。
@@ -100,7 +101,7 @@ func handleModelForAuth(request []byte) ([]byte, error) {
 	}
 	return okEnvelope(pluginapi.ModelResponse{
 		Provider: providerKey,
-		Models:   filterDisabledModelsForVendor(vendor.ID(), models),
+		Models:   applyModelAliases(vendor.ID(), filterDisabledModelsForVendor(vendor.ID(), models)),
 	})
 }
 
@@ -126,14 +127,19 @@ func staticModels(ctx context.Context) ([]pluginapi.ModelInfo, error) {
 			}
 			continue
 		}
-		// 缓存一份供管理页回读：管理页刷新是高频操作，不该每次都打上游。
+		// 缓存一份**原始（官方 ID）**清单供管理页回读：管理页展示官方 ID 与别名两列，
+		// 而注册路径此刻正要换成对外别名，不能再拿它当回读源。
 		cacheStaticModels(vendor.ID(), models)
-		all = append(all, filterDisabledModelsForVendor(vendor.ID(), models)...)
+		filtered := filterDisabledModelsForVendor(vendor.ID(), models)
+		all = append(all, applyModelAliases(vendor.ID(), filtered)...)
 	}
 	if len(all) == 0 && firstErr != nil {
 		return nil, errorToPluginError(firstErr)
 	}
-	all = append(all, extraModels(loadedConfig())...)
+	// 额外模型同样支持别名：逐条按其供应商换对外 ID。
+	for _, extra := range extraModels(loadedConfig()) {
+		all = append(all, applyModelAliases(extra.OwnedBy, []pluginapi.ModelInfo{extra})...)
+	}
 	return mergeSameNameModels(all), nil
 }
 
@@ -261,6 +267,7 @@ func extraModels(cfg pluginConfig) []pluginapi.ModelInfo {
 			out = append(out, extraModelInfo(vendor.ID(), bare))
 		}
 	}
+	// 额外模型在注册路径（staticModels）统一应用别名；此处返回官方 ID 条目。
 	return out
 }
 
@@ -302,6 +309,8 @@ func baseURLOverride(vendorID string) string {
 		return cfg.MiniMaxCodeCNBaseURL
 	case minimaxcode.VendorIDGlobal:
 		return cfg.MiniMaxCodeGlobalBaseURL
+	case zcode.VendorID:
+		return cfg.ZCodeBaseURL
 	default:
 		return ""
 	}
@@ -315,6 +324,10 @@ func applyModelCatalog(cfg pluginConfig) {
 	workbuddy.SetProbeCredentialFunc(func(region workbuddy.Region) *workbuddy.Credential {
 		return probeCredentialForRealm(region)
 	})
+	// 走到这里说明宿主正在重建模型注册表（register / reconfigure）——此前的
+	// 模型变更（禁用/启用、别名）此刻才真正生效，连带的「待生效」提示可以收掉了。
+	clearRestartPending()
+
 	cached := loadCachedModelsFromState()
 	if len(cached) == 0 {
 		return

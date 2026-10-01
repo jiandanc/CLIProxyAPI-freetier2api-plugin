@@ -84,6 +84,11 @@ type pluginConfig struct {
 	MiniMaxCodeCNBaseURL string
 	// MiniMaxCodeGlobalBaseURL 覆盖 MiniMax Code 国际版基地址。
 	MiniMaxCodeGlobalBaseURL string
+	// ZCodeBaseURL 覆盖 ZCode 对话上游基地址（留空用内置默认值 api.z.ai）。
+	//
+	// ZCode 的两条通道域名不同（对话走 api.z.ai，计费走 zcode.z.ai），因此这里
+	// 只覆盖对话侧——计费域名不对外暴露覆盖项，避免用户误配导致账号状态错乱。
+	ZCodeBaseURL string
 }
 
 const (
@@ -212,6 +217,8 @@ func applyConfigLine(cfg *pluginConfig, key, value string) error {
 		cfg.MiniMaxCodeCNBaseURL = strings.TrimSpace(value)
 	case "minimax_code_global_base_url", "minimax_global_base_url":
 		cfg.MiniMaxCodeGlobalBaseURL = strings.TrimSpace(value)
+	case "zcode_base_url":
+		cfg.ZCodeBaseURL = strings.TrimSpace(value)
 	case "state_dir":
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
 			cfg.StateDir = trimmed
@@ -522,6 +529,7 @@ func applyConfig(cfg pluginConfig) error {
 	applyPromptConfig(cfg)
 	storeConfig(cfg)
 	refreshDisabledModelCache()
+	refreshModelAliasCache()
 	return nil
 }
 

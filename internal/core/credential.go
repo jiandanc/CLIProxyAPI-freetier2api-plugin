@@ -22,7 +22,20 @@ type Credential struct {
 	Region string
 	// Label 是展示名（昵称/邮箱/uid，取第一个非空）。
 	Label string
-	// UID 是账号唯一标识，也是设备指纹的派生种子。
+	// FileID 是**账号身份**：凭证文件名去掉 .json 后缀，全局唯一且稳定。
+	//
+	// 专门用于「按账号落状态」的场景——签到记录、任务历史、额度缓存。
+	// 与 UID 的分工是刻意的：UID 是**上游身份**（WorkBuddy 的 X-Uid 与设备
+	// 指纹种子、Trae 的 X-Uid），换了会让上游视为新设备；而 FileID 只在本
+	// 插件内部使用，各家算法一致、没有分支。
+	//
+	// 早期版本拿 UID 兼做账号身份，导致「UID 取自凭证内容」的供应商
+	// （WorkBuddy）正常，而「UID 取自文件名」的供应商（Qoder/ZCode）在
+	// 签到与展示两条路径上拿到不同的文件名、算出两个身份，页面于是永远
+	// 显示「未签到」。
+	FileID string
+	// UID 是上游身份标识，仅用于出站请求（X-Uid、设备指纹派生、userId 上报）。
+	// 为空的供应商表示上游不需要它。
 	UID string
 	// Token 是出站凭证：OAuth 账号是 access token，设备令牌账号是 device token。
 	Token string
@@ -86,7 +99,30 @@ func (c *Credential) LabelValue() string {
 	return c.Label
 }
 
-// UIDValue 返回加锁快照的 UID。
+// FileIDValue 返回加锁快照的账号身份（文件名去掉 .json）。
+func (c *Credential) FileIDValue() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.FileID
+}
+
+// SetFileID 设置账号身份。
+//
+// 解析凭证时由各供应商的 Parse 填入，或由根层按文件名兜底（见
+// ensureFileID）；后者保证任何供应商都不会因漏填而失去账号身份。
+func (c *Credential) SetFileID(fileID string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.FileID = fileID
+}
+
+// UIDValue 返回加锁快照的上游身份标识。
 func (c *Credential) UIDValue() string {
 	if c == nil {
 		return ""

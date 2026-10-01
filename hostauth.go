@@ -150,6 +150,28 @@ func filterPluginAuths(entries []hostAuthEntry) []hostAuthEntry {
 	return out
 }
 
+// accountIdentity 返回一个宿主账号条目的**唯一权威身份标识**。
+//
+// 这是「按账号落状态」的唯一取值点：签到记录、任务历史、额度缓存都必须经它，
+// 否则同一个账号会在不同路径上算出不同身份。
+//
+// 之所以需要它：宿主给同一条账号记录提供了多个标识（ID、Name、AuthIndex），
+// 三者并不相等（AuthIndex 是运行期索引，Name 才对应磁盘文件名）。早期代码
+// 有的路径传 AuthIndex、有的传 Name，于是「UID 取自文件名」的供应商
+// （Qoder/ZCode）在签到与展示上得到两个身份，签到写进 A、页面查 B，
+// 永远显示「未签到」。统一收口到本函数后，这类分歧不可能再出现。
+//
+// 取值优先级：Name（磁盘文件名，登录落盘时生成，可读且稳定）→ ID（宿主
+// 稳定标识，运行时账号没有 Name）→ AuthIndex（最后兜底，仅保证非空）。
+func accountIdentity(entry hostAuthEntry) string {
+	for _, candidate := range []string{entry.Name, entry.ID, entry.AuthIndex} {
+		if trimmed := strings.TrimSuffix(strings.TrimSpace(candidate), ".json"); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
 func normalizeAuthKey(raw string) string {
 	s := strings.TrimSpace(raw)
 	if s == "" {

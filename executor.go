@@ -48,13 +48,21 @@ type preparedExecution struct {
 	vendor     core.Vendor
 	credential *core.Credential
 	model      string
+	// modelAliased 报告请求命中了别名：出站前需要把请求体里的模型名一并还原。
+	modelAliased bool
 }
 
 // executeRequest 把宿主的执行请求转成供应商无关的形态。
 func (p preparedExecution) executeRequest() *core.ExecuteRequest {
+	payload := p.rpc.Payload
+	if p.modelAliased {
+		// 供应商的对话实现多从请求体读 model（Qoder / Trae 等），别名必须在这里
+		// 一并还原成官方 ID，否则上游收到的是别名。
+		payload = rewritePayloadModel(payload, p.model)
+	}
 	return &core.ExecuteRequest{
 		Model:    p.model,
-		Payload:  p.rpc.Payload,
+		Payload:  payload,
 		Headers:  p.rpc.Headers,
 		ClientIP: workbuddy.ExtractClientIP(p.rpc.Headers),
 		Stream:   p.rpc.Stream,
@@ -105,6 +113,26 @@ func handleExecutorExecuteStream(request []byte) ([]byte, error) {
 	}()
 
 	return okEnvelope(rpcExecutorStreamResponse{Headers: streamHeaders})
+}
+
+// rewritePayloadModel 把请求体里的 model 字段改写成官方 ID。
+//
+// 解析失败时原样返回：宁可不改写，也不要让一次对话因为本地 JSON 解析失败而中断——
+// 上游的真实报错比本地解析错误更有诊断价值（与 workbuddy.PrepareBody 同口径）。
+func rewritePayloadModel(payload []byte, model string) []byte {
+	if len(payload) == 0 || strings.TrimSpace(model) == "" {
+		return payload
+	}
+	var obj map[string]any
+	if errUnmarshal := json.Unmarshal(payload, &obj); errUnmarshal != nil || obj == nil {
+		return payload
+	}
+	obj["model"] = model
+	encoded, errMarshal := json.Marshal(obj)
+	if errMarshal != nil {
+		return payload
+	}
+	return encoded
 }
 
 // runStreamExecution 在后台把上游 SSE 转发给宿主流。
@@ -208,13 +236,18 @@ func prepareExecution(request []byte) (preparedExecution, error) {
 
 	// 模型带的供应商前缀优先；无前缀时就用裸名（宿主按 EqualFold 合并同名模型）。
 	_, bareModel := core.SplitModelID(prepared.rpc.Model)
-	prepared.model = bareModel
 	if strings.TrimSpace(bareModel) == "" {
 		return prepared, newPluginError("invalid_request", "model is required", http.StatusBadRequest)
 	}
 
+	// 客户端请求的是别名时还原成上游官方 ID：禁用校验与出站都用官方 ID，
+	// 因此还原必须发生在两者之前。
+	prepared.model = resolveOutboundModel(vendor.ID(), bareModel)
+	prepared.modelAliased = prepared.model != bareModel
+
 	// 检查模型是否已被插件配置禁用（禁用键是 vendor:model，跨供应商互不影响）。
-	if isModelDisabled(vendor.ID(), bareModel) {
+	// 用官方 ID 判定：管理页展示与写入的禁用键都是官方 ID，别名只是对外名字。
+	if isModelDisabled(vendor.ID(), prepared.model) {
 		return prepared, newPluginError("model_disabled",
 			fmt.Sprintf("model %q is disabled by plugin configuration", prepared.rpc.Model),
 			http.StatusBadRequest)

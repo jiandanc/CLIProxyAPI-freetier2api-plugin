@@ -112,7 +112,8 @@ func defaultRealmForParse(cfg pluginConfig) workbuddy.Region {
 func buildAuthDataFor(vendor core.Vendor, credential *core.Credential, fileName string, storageJSON []byte) (pluginapi.AuthData, error) {
 	id := strings.TrimSuffix(fileName, ".json")
 	if id == "" {
-		id = credential.UIDValue()
+		// 兜底用账号身份（文件名）；上游 UID 不是身份标识，不该出现在这里。
+		id = credential.FileIDValue()
 	}
 	storage, errStorage := ensureVendorField(storageJSON, vendor.ID())
 	if errStorage != nil {
@@ -165,7 +166,7 @@ func credentialMetadata(credential *core.Credential, vendorID string) map[string
 		core.VendorKey: vendorID,
 		"realm":        credential.RegionValue(),
 	}
-	if uid := credential.UIDValue(); uid != "" {
+	if uid := credential.FileIDValue(); uid != "" {
 		metadata["uid"] = uid
 	}
 	if label := credential.LabelValue(); label != "" {
@@ -187,7 +188,7 @@ func credentialAttributes(credential *core.Credential, vendorID string) map[stri
 		core.VendorKey: vendorID,
 		"realm":        credential.RegionValue(),
 	}
-	if uid := credential.UIDValue(); uid != "" {
+	if uid := credential.FileIDValue(); uid != "" {
 		attributes["uid"] = uid
 	}
 	if label := credential.LabelValue(); label != "" {
@@ -379,6 +380,12 @@ func parseVendorCredential(raw []byte, authID string, attributes map[string]stri
 	credential, errParse := vendor.Parse(raw, fileName)
 	if errParse != nil {
 		return nil, false
+	}
+	// 账号身份由根层兜底：供应商的 Parse 可以设置它，但不设置也不会失去身份。
+	// 放在这里而不是要求各家实现，是因为漏填时没有任何编译期或运行期提示——
+	// 症状只是「签到后仍显示未签到」这类极难定位的错位。详见 core.Credential.FileID。
+	if credential.FileIDValue() == "" {
+		credential.SetFileID(strings.TrimSuffix(fileName, ".json"))
 	}
 	applyAttributeOverrides(credential, attributes)
 	return credential, true

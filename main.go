@@ -35,7 +35,7 @@ import (
 var pluginVersion = defaultPluginVersion
 
 // defaultPluginVersion 是未注入时的版本号。
-const defaultPluginVersion = "0.0.8"
+const defaultPluginVersion = "0.0.9"
 
 // effectivePluginVersion 返回对外上报的版本号。
 //

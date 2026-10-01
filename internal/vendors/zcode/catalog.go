@@ -1,106 +1,142 @@
 package zcode
 
-// 模型目录：提供可用模型列表与元数据定义。
-// 参考：/Users/jiandan/Workspaces/zcode2api/app/constants.py
+// 模型目录。
+//
+// 上游的权威清单在 client/configs（免鉴权的公开端点），现行只有 GLM-5.3 与
+// GLM-5.3-Flash 两个模型；早期版本的 GLM-5.x / GLM-4.7 已从套餐下线，继续
+// 公布会让客户端选到必报 3006（model not allowed）的名字。因此这里以
+// configs 为准，仅在拉取失败时回退内置清单。
 
 import (
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
 	"strings"
+	"time"
+
+	"freetier2api-plugin/internal/httpx"
 )
 
+// Model 是一个可用模型的元数据。
 type Model struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	ContextWindow int    `json:"context_window"`
-	MaxTokens     int    `json:"max_tokens"`
-	SupportsTools bool   `json:"supports_tools"`
-	IsReasoning   bool   `json:"is_reasoning"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	ContextWindow  int    `json:"context_window"`
+	MaxTokens      int    `json:"max_tokens"`
+	SupportsTools  bool   `json:"supports_tools"`
+	SupportsImages bool   `json:"supports_images"`
+	IsReasoning    bool   `json:"is_reasoning"`
 }
 
-// DefaultModels 返回 ZCode 的默认可用模型列表。
-func DefaultModels() []Model {
+// fallbackModels 是 configs 拉取失败时的内置清单（与现行上游一致）。
+func fallbackModels() []Model {
 	return []Model{
 		{
 			ID:            "GLM-5.3",
 			Name:          "GLM-5.3",
-			Description:   "ZCode GLM-5.3 旗舰代码与通用大模型",
-			ContextWindow: 131072,
-			MaxTokens:     8192,
+			Description:   "ZCode 旗舰模型，适合复杂代码与长上下文任务",
+			ContextWindow: 1000000,
+			MaxTokens:     128000,
 			SupportsTools: true,
 			IsReasoning:   true,
 		},
 		{
-			ID:            "GLM-5.3-Flash",
-			Name:          "GLM-5.3-Flash",
-			Description:   "ZCode GLM-5.3 Flash 高速低延迟模型",
-			ContextWindow: 131072,
-			MaxTokens:     8192,
-			SupportsTools: true,
-			IsReasoning:   false,
-		},
-		{
-			ID:            "GLM-5.2",
-			Name:          "GLM-5.2",
-			Description:   "ZCode GLM-5.2 代码助手模型",
-			ContextWindow: 131072,
-			MaxTokens:     8192,
-			SupportsTools: true,
-			IsReasoning:   true,
-		},
-		{
-			ID:            "GLM-5-Turbo",
-			Name:          "GLM-5-Turbo",
-			Description:   "ZCode GLM-5 Turbo 快速模型",
-			ContextWindow: 131072,
-			MaxTokens:     8192,
-			SupportsTools: true,
-			IsReasoning:   false,
-		},
-		{
-			ID:            "GLM-5.1",
-			Name:          "GLM-5.1",
-			Description:   "ZCode GLM-5.1 大模型",
-			ContextWindow: 131072,
-			MaxTokens:     8192,
-			SupportsTools: true,
-			IsReasoning:   false,
-		},
-		{
-			ID:            "GLM-4.7",
-			Name:          "GLM-4.7",
-			Description:   "ZCode GLM-4.7 经典代码模型",
-			ContextWindow: 131072,
-			MaxTokens:     8192,
-			SupportsTools: true,
-			IsReasoning:   false,
+			ID:             "GLM-5.3-Flash",
+			Name:           "GLM-5.3-Flash",
+			Description:    "ZCode 高速模型，支持图片输入",
+			ContextWindow:  1000000,
+			MaxTokens:      128000,
+			SupportsTools:  true,
+			SupportsImages: true,
+			IsReasoning:    true,
 		},
 	}
 }
 
-// NormalizeModelName 归一化模型大小写（映射到官方 Pascal/Camel 命名）。
+// FetchModels 从上游拉取当前模型清单；失败时回退内置清单。
+func FetchModels(ctx context.Context) ([]Model, error) {
+	url := ZCodeOrigin + PathClientConfigs + "?app_version=" + ClientAppVersion
+	req, errNew := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if errNew != nil {
+		return fallbackModels(), nil
+	}
+	req.Header.Set("User-Agent", UserAgent)
+
+	resp, errDo := httpx.Client(ctx, 15*time.Second).Do(req)
+	if errDo != nil {
+		return fallbackModels(), nil
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, errRead := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if errRead != nil || resp.StatusCode >= 400 {
+		return fallbackModels(), nil
+	}
+
+	models := parseConfigModels(body)
+	if len(models) == 0 {
+		return fallbackModels(), nil
+	}
+	return models, nil
+}
+
+// parseConfigModels 从 client/configs 响应里提取 builtinModels。
+func parseConfigModels(body []byte) []Model {
+	var payload struct {
+		Data struct {
+			BuiltinModels []struct {
+				ModelID             string `json:"modelId"`
+				Name                string `json:"name"`
+				Description         string `json:"description"`
+				ContextWindow       int    `json:"contextWindow"`
+				MaxCompletionTokens int    `json:"maxCompletionTokens"`
+				Capabilities        struct {
+					Vision bool `json:"vision"`
+				} `json:"capabilities"`
+				Reasoning struct {
+					Levels map[string]any `json:"levels"`
+				} `json:"reasoning"`
+			} `json:"builtinModels"`
+		} `json:"data"`
+	}
+	if errUnmarshal := json.Unmarshal(body, &payload); errUnmarshal != nil {
+		return nil
+	}
+
+	models := make([]Model, 0, len(payload.Data.BuiltinModels))
+	for _, item := range payload.Data.BuiltinModels {
+		id := strings.TrimSpace(item.ModelID)
+		if id == "" {
+			continue
+		}
+		models = append(models, Model{
+			ID:             id,
+			Name:           firstNonEmpty(item.Name, id),
+			Description:    item.Description,
+			ContextWindow:  item.ContextWindow,
+			MaxTokens:      item.MaxCompletionTokens,
+			SupportsTools:  true,
+			SupportsImages: item.Capabilities.Vision,
+			IsReasoning:    len(item.Reasoning.Levels) > 0,
+		})
+	}
+	return models
+}
+
+// NormalizeModelName 归一化模型名大小写（上游对模型名大小写敏感）。
+//
+// 客户端常传小写别名，这里映射回官方写法；未知名字原样返回，让上游给出
+// 明确的「模型不存在」而不是被静默改写。
 func NormalizeModelName(model string) string {
-	m := strings.TrimSpace(model)
-	lower := strings.ToLower(m)
-	switch lower {
+	trimmed := strings.TrimSpace(model)
+	switch strings.ToLower(trimmed) {
 	case "glm-5.3", "glm-5.3-pro":
 		return "GLM-5.3"
 	case "glm-5.3-flash":
 		return "GLM-5.3-Flash"
-	case "glm-5.2":
-		return "GLM-5.2"
-	case "glm-5-turbo", "glm-turbo":
-		return "GLM-5-Turbo"
-	case "glm-5.1":
-		return "GLM-5.1"
-	case "glm-4.7":
-		return "GLM-4.7"
 	default:
-		return m
+		return trimmed
 	}
-}
-
-// FetchModels 返回本供应商当前可用模型。
-func FetchModels(ctx context.Context) ([]Model, error) {
-	return DefaultModels(), nil
 }

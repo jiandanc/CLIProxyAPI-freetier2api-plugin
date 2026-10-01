@@ -619,11 +619,6 @@ func MapModel(agent, model string) string {
 		return model
 	}
 
-	// 0. 优先精准解析 Qoder 内部 key（支持通用小写名如 glm-5.3-flash -> gfmodel，以及直接传内部 key）
-	if resolved := ResolveQoderModelKey(model); resolved != "" {
-		return resolved
-	}
-
 	agentTables, flatTable := currentModelMappings()
 
 	// 1. agent 维度的用户配置优先（信任用户配置值，UI 已限制为上游合法 key）

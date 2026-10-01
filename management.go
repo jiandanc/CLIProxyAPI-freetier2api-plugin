@@ -48,6 +48,7 @@ func managementRegistration() pluginapi.ManagementRegistrationResponse {
 			{Method: "POST", Path: managementRoutePrefix + "/accounts/add", Description: "添加 API Key 类账号。"},
 			{Method: "GET", Path: managementRoutePrefix + "/models", Description: "读取当前注册的模型清单。"},
 			{Method: "POST", Path: managementRoutePrefix + "/models/toggle", Description: "批量禁用/启用模型。"},
+			{Method: "POST", Path: managementRoutePrefix + "/models/alias", Description: "给模型设置/清除对外别名（跨供应商同名可合并路由）。"},
 			{Method: "POST", Path: managementRoutePrefix + "/models/refresh", Description: "从上游拉取模型清单并缓存。"},
 			{Method: "GET", Path: managementRoutePrefix + "/logs", Description: "读取插件日志（增量）。"},
 			{Method: "POST", Path: managementRoutePrefix + "/settings", Description: "更新插件运行期设置（自动签到、任务排程、提示词）。"},
@@ -117,6 +118,9 @@ func handleManagement(request []byte) ([]byte, error) {
 
 	case method == http.MethodPost && matchesManagementPath(rpc.Path, "/models/toggle"):
 		return okEnvelope(handleModelsToggle(rpc))
+
+	case method == http.MethodPost && matchesManagementPath(rpc.Path, "/models/alias"):
+		return okEnvelope(handleModelAlias(rpc))
 
 	case method == http.MethodPost && matchesManagementPath(rpc.Path, "/models/refresh"):
 		ctx, cancel := managementContext(rpc)
@@ -275,9 +279,11 @@ type consoleModel struct {
 	// VendorID 是模型所属的供应商实例（workbuddycn 等），页面用它做分组与筛选。
 	VendorID string `json:"vendor_id"`
 	// VendorName 是供应商展示名（如「WorkBuddy 国内版」）。
-	VendorName      string   `json:"vendor_name"`
-	Realm           string   `json:"realm"`
-	Name            string   `json:"name,omitempty"`
+	VendorName string `json:"vendor_name"`
+	Realm      string `json:"realm"`
+	Name       string `json:"name,omitempty"`
+	// Alias 是该模型设置的对外别名（未设置时为空；对外 ID 届时即 Alias）。
+	Alias           string   `json:"alias,omitempty"`
 	Description     string   `json:"description,omitempty"`
 	ContextLength   int64    `json:"context_length,omitempty"`
 	MaxOutputTokens int64    `json:"max_output_tokens,omitempty"`
@@ -316,7 +322,8 @@ func handleModelsList(req pluginapi.ManagementRequest) pluginapi.ManagementRespo
 
 	// 额外注册的模型（配置里的 extra_models）也一并展示（前提是该供应商有凭证）。
 	for _, extra := range extraModels(cfg) {
-		vendorID, bare := core.SplitModelID(extra.ID)
+		// 供应商取自 OwnedBy：extraModelInfo 已把 ID 归一成裸名，再 SplitModelID 会丢掉前缀。
+		vendorID := extra.OwnedBy
 		if vendorID != "" {
 			if _, okVendor := core.VendorByID(vendorID); !okVendor {
 				continue
@@ -326,8 +333,8 @@ func handleModelsList(req pluginapi.ManagementRequest) pluginapi.ManagementRespo
 			}
 		}
 		models = append(models, consoleModel{
-			ID:            bare,
-			ScopeID:       core.ModelKeyFor(vendorID, bare),
+			ID:            extra.ID,
+			ScopeID:       core.ModelKeyFor(vendorID, extra.ID),
 			VendorID:      vendorID,
 			VendorName:    vendorNameFor(vendorID),
 			Realm:         vendorRegionFor(vendorID),
@@ -469,6 +476,7 @@ func buildStatusPayload(req pluginapi.ManagementRequest) map[string]any {
 		"account_count":     len(accounts),
 		"model_counts":      modelCounts,
 		"models_fetched_at": state.ModelsFetchedAt,
+		"restart_pending":   state.RestartPending,
 		"settings":          effectiveSettings(),
 		"scheduler":         schedulerStatus(),
 	}
@@ -562,7 +570,7 @@ func listAccountSummaries(ctx context.Context, callbackID string) []accountSumma
 				}
 			}
 			// 按凭证归属解析；解不出时保留宿主给的 provider 作为兜底展示。
-			if credential, okParse := parseVendorCredential(raw, entry.Name, nil); okParse {
+			if credential, okParse := parseVendorCredential(raw, accountIdentity(entry), nil); okParse {
 				summary.VendorID = credential.VendorIDValue()
 				summary.Realm = credential.RegionValue()
 				if vendor, okVendor := core.VendorByID(summary.VendorID); okVendor {
@@ -572,9 +580,12 @@ func listAccountSummaries(ctx context.Context, callbackID string) []accountSumma
 				if label := credential.LabelValue(); label != "" {
 					summary.Label = label
 				}
-				if uid := credential.UIDValue(); uid != "" {
+				if uid := credential.FileIDValue(); uid != "" {
 					accountUID = uid
 					if record, okRecord := state.Checkin[uid]; okRecord {
+						summary.Checkin = &record
+					} else if record, okLegacy := lookupLegacyCheckin(credential); okLegacy {
+						// 旧记录回退（只读）。见 lookupLegacyCheckin 的说明。
 						summary.Checkin = &record
 					}
 				}
@@ -737,7 +748,7 @@ func deleteAuthFile(ctx context.Context, callbackID string, entry hostAuthEntry)
 	if !okRaw {
 		return fmt.Errorf("读取凭证失败，无法确认归属")
 	}
-	if _, okParse := parseVendorCredential(raw, entry.Name, nil); !okParse {
+	if _, okParse := parseVendorCredential(raw, accountIdentity(entry), nil); !okParse {
 		return fmt.Errorf("该凭证不属于本插件，拒绝删除")
 	}
 
@@ -909,6 +920,25 @@ func handleCheckinRequest(req pluginapi.ManagementRequest) pluginapi.ManagementR
 }
 
 // recordCheckinResult 把签到结果写入状态。
+// lookupLegacyCheckin 读取「账号身份迁移前的 UID 键」下的签到记录。
+//
+// 账号身份从 UID 改为文件名（core.Credential.FileID）之前，签到记录是按上游
+// UID 落的键——WorkBuddy 的键是纯 UUID（79fdc1fc-…），与文件名不同。迁移后
+// 若只按新键查，存量账号会突然显示「未签到」，直到下一次签到才补上新键。
+//
+// 这是**只读回退**：不写旧键、不迁移数据，仅让存量的「今天已签到」继续可见。
+// 代价是旧键会一直留在 state.json 里（每条几十字节），换取的是不需要一次性
+// 数据迁移脚本、也不会因迁移失败丢记录。
+func lookupLegacyCheckin(credential *core.Credential) (checkinRecord, bool) {
+	legacyUID := credential.UIDValue()
+	if legacyUID == "" || legacyUID == credential.FileIDValue() {
+		return checkinRecord{}, false
+	}
+	state := snapshotState()
+	record, okRecord := state.Checkin[legacyUID]
+	return record, okRecord
+}
+
 // recordCheckinResult 把一次签到结果写进状态（供页面展示）。
 //
 // 接收中立的 core.CheckinResult：各家的签到结果字段不同（WorkBuddy 有积分+
@@ -917,7 +947,7 @@ func recordCheckinResult(credential *core.Credential, result *core.CheckinResult
 	if credential == nil || result == nil {
 		return
 	}
-	uid := credential.UIDValue()
+	uid := credential.FileIDValue()
 	if uid == "" {
 		return
 	}
@@ -1036,7 +1066,7 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 		}
 		// 按凭证归属分发解析：拿固定解析器解所有凭证会让另一家的凭证
 		// 报「凭证解析失败」（例如 Qoder 的凭证用 WorkBuddy 的结构去解）。
-		credential, vendor, errResolve := resolveVendorCredential(ctx, callbackID, raw, entry.AuthIndex, nil)
+		credential, vendor, errResolve := resolveVendorCredential(ctx, callbackID, raw, accountIdentity(entry), nil)
 		if errResolve != nil {
 			preResults = append(preResults, quotaResult{
 				AuthID:  firstNonEmptyString(entry.ID, entry.Name),
@@ -1061,7 +1091,7 @@ func handleQuotasRequest(req pluginapi.ManagementRequest) pluginapi.ManagementRe
 				AuthID:    firstNonEmptyString(current.entry.ID, current.entry.Name),
 				AuthIndex: current.entry.AuthIndex,
 				Name:      current.entry.Name,
-				UID:       current.credential.UIDValue(),
+				UID:       current.credential.FileIDValue(),
 				Label:     firstNonEmptyString(current.credential.LabelValue(), current.entry.Label, current.entry.Name),
 				VendorID:  current.vendor.ID(),
 				Realm:     current.credential.RegionValue(),
@@ -1177,7 +1207,7 @@ func runForAccounts(
 			continue
 		}
 		// 按归属分发：拿固定解析器解所有凭证会让另一家的凭证被静默跳过。
-		credential, vendor, errResolve := resolveVendorCredential(ctx, callbackID, raw, entry.AuthIndex, nil)
+		credential, vendor, errResolve := resolveVendorCredential(ctx, callbackID, raw, accountIdentity(entry), nil)
 		if errResolve != nil {
 			continue
 		}
@@ -1187,7 +1217,7 @@ func runForAccounts(
 		if filter != nil && !filter(vendor, credential) {
 			continue
 		}
-		uid := credential.UIDValue()
+		uid := credential.FileIDValue()
 		if uid == "" {
 			uid = firstNonEmptyString(entry.ID, entry.Name)
 		}
@@ -1361,7 +1391,7 @@ func handleKeepaliveRequest(req pluginapi.ManagementRequest) pluginapi.Managemen
 			continue
 		}
 		// 按归属分发：续期链路各家不同（WorkBuddy 换 token，Qoder jobToken 交换）。
-		credential, vendor, errResolve := resolveVendorCredential(ctx, callbackID, raw, entry.AuthIndex, nil)
+		credential, vendor, errResolve := resolveVendorCredential(ctx, callbackID, raw, accountIdentity(entry), nil)
 		if errResolve != nil {
 			continue
 		}

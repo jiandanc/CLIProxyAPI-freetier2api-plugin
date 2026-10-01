@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"strings"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
 	"freetier2api-plugin/internal/core"
@@ -44,7 +45,7 @@ func (v *codeartsVendor) Parse(raw []byte, fileName string) (*core.Credential, e
 		VendorID:  codearts.VendorID,
 		Region:    "cn",
 		Label:     label,
-		UID:       native.UserID,
+		FileID:    strings.TrimSuffix(strings.TrimSpace(fileName), ".json"),
 		Token:     native.AccessKeyID,
 		ExpiresAt: native.ExpiresAt,
 		AuthMode:  "oauth",

@@ -64,6 +64,20 @@ func handleAuthLoginStart(request []byte) ([]byte, error) {
 	if errStart != nil {
 		return nil, errorToPluginError(errStart)
 	}
+	// 供应商标识由根层统一注入，不交给各供应商自己记着。
+	//
+	// 宿主靠 metadata.vendor 把登录会话绑定回具体供应商；缺了它宿主拿不到
+	// 授权链接，页面只会看到「获取授权链接失败」。把这一步放在分发点而不是
+	// 各供应商的 LoginStart 里：新增供应商时没人会记得补，且漏掉时没有任何
+	// 编译期或运行期提示——本插件曾因此让 codearts / trae / traesolo 三个
+	// 供应商长期无法添加账号。
+	if response != nil {
+		if response.Metadata == nil {
+			response.Metadata = map[string]any{}
+		}
+		response.Metadata[core.VendorKey] = vendor.ID()
+		response.Metadata["region"] = vendor.Region()
+	}
 	logger.Info("started login (vendor=%s)", vendor.ID())
 	return okEnvelope(response)
 }

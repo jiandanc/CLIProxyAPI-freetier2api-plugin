@@ -64,7 +64,7 @@ func (v *opencodeZenVendor) Parse(raw []byte, fileName string) (*core.Credential
 		VendorID: opencodezen.VendorID,
 		Label:    label,
 		// UID 用脱敏 key：它只用于状态去重与展示，不需要（也不该）是完整 key。
-		UID:      opencodezen.MaskedKey(native.APIKey),
+		FileID:   strings.TrimSuffix(strings.TrimSpace(fileName), ".json"),
 		Token:    native.APIKey,
 		AuthMode: "apikey",
 		Native:   native,

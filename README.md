@@ -250,23 +250,57 @@ OpenCode ZEN 无登录流程，直接用官网申请的 API key 即可：
 
 ### ZCode 凭证字段
 
-ZCode (Z.AI) 支持 API Key（Coding Plan 回退通道）与 JWT Token（Plan 主通道）：
+ZCode (Z.AI) 账号由**控制台 OAuth 登录**产生：一次授权同时拿到 Coding Plan
+JWT（`data.token`）与兑换出的 API Key，两者一起落盘。
 
 ```json
 {
   "type": "freetier",
   "vendor": "zcode",
-  "api_key": "xxx.xxx",
+  "auth_mode": "oauth",
+  "api_key": "xxx.yyy",
   "jwt_token": "...",
-  "label": "我的 ZCode 账号"
+  "email": "user@example.com",
+  "user_id": "u-1",
+  "label": "user@example.com",
+  "profile": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "os_version": "25.5.0",
+    "language": "zh-CN",
+    "timezone": "Asia/Shanghai",
+    "screen": "1512x982",
+    "device_mid": "…"
+  }
 }
 ```
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
-| `api_key` | 二选一 | Z.AI API Key（智谱 API 格式），免人机验证码 |
-| `jwt_token` | 二选一 | ZCode Plan 通道 JWT Token（亦可通过控制台发起 OAuth 登录自动换取） |
-| `label` | 否 | 账号展示名称 |
+| `api_key` | 对话必填 | Z.AI API Key（`api.z.ai` 通道），**免人机验证码** |
+| `jwt_token` | 计费必填 | Coding Plan JWT，用于额度查询 |
+| `profile` | 建议 | 每账号独立设备档案（一号一台设备，避免多账号被聚成同一台机器） |
+| `email` / `user_id` / `label` | 否 | 展示信息，登录时自动从 JWT 解出 |
+
+**两条通道的分工**（重要）：
+
+ZCode 有两条互不相同的上游通道，本插件按能力把它们分开使用：
+
+| 通道 | 端点 | 鉴权 | 验证码 | 用途 |
+| --- | --- | --- | --- | --- |
+| API Key | `api.z.ai` | `x-api-key` | **不需要** | **对话**（唯一出站路径） |
+| Coding Plan | `zcode.z.ai` | `Bearer JWT` | 额度查询不需要 | 额度查询 |
+
+Coding Plan 通道中的**活动套餐领取**（`billing/claim`）被上游强制要求
+`X-Aliyun-Captcha-Verify-Param`，而该验证码是阿里云**无痕**验证（静默采集
+浏览器指纹后由服务端判定，没有图片/滑块可作答），无法用视觉模型代答。
+本插件不内置浏览器求解器，因此：
+
+- **对话一律走 API Key 通道**；
+- **ZCode 不提供签到**（其「签到」实质就是领取活动套餐），控制台按
+  「无签到活动」展示，与 Cline / OpenCode ZEN 一致。如需领取请在官方客户端操作。
+
+直接手填 `api_key`（智谱格式 `xxx.yyy`）同样可用，此时只能对话、没有额度信息。
 
 ### TRAE SOLO 凭证字段
 
@@ -352,9 +386,44 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 模型用**裸名**（不带供应商前缀）。跨供应商的同名模型由宿主按
 `strings.EqualFold` 合并为一个条目，宿主再从各家凭证里选号。
 
-> **注意**：同名模型的选号可能花到另一家供应商的额度。例如 `GLM-5.3`（Qoder）
-> 与 `glm-5.3`（WorkBuddy）在宿主眼里是同一个模型。若需要精确指定，用
-> `vendor:model` 形式（如 `workbuddycn:glm-5.2`）。
+> **注意**：同名模型的选号可能花到另一家供应商的额度。例如 `glm-5.3` 同时存在于
+> WorkBuddy 与 Qoder，在宿主眼里是同一个模型。若需要精确指定，用
+> `vendor:model` 形式（如 `workbuddycn:glm-5.2`）；若想反向操作——让多个供应商
+> 共用一个名字自动调度，见下面的「模型别名与跨供应商路由」。
+
+### 模型别名与跨供应商路由
+
+在控制台页「模型」区块，**点击某行的「别名」单元格**即可编辑：回车或点开别处保存，
+Esc 取消；清空保存即清除别名。每个供应商的每个模型各自独立设置。别名就是该模型
+注册给宿主的对外模型 ID，客户端以别名调用，出站前插件再还原成上游的官方 ID。
+
+这带来一个关键能力：**把不同供应商的不同模型设成同一个别名**。宿主会把这个
+别名当作一个模型，从这几家凭证里选号——任意一家可用即可应答，天然跨供应商
+故障转移。例如给 `workbuddycn:glm-5.2` 与 `qodercn:gmodel` 都设别名 `glm-max`，
+客户端只请求 `glm-max`，网关会在两家之间自动调度。
+
+- 作用是**供应商内的单个模型 ID**：同名的官方 ID 出现在别的供应商时互不影响，
+  各家可各自起别名。
+- 别名在**同一供应商内唯一**：把某别名换绑到新模型时，该供应商下占用同名别名
+  的旧模型会恢复官方 ID。
+- 别名留空即清除，模型恢复用官方 ID 对外。
+- 别名**即时生效**（调用与出站都读内存表）；但 `/v1/models` 的**列表增删**
+  要等宿主重建模型注册表——见下面的「模型变更的生效」。
+
+### 模型变更的生效
+
+**为什么不是即时**：禁用的「拦截」与别名的「出站翻译」都在插件内存里，改完立刻
+生效（被禁用的模型当场调用会被拒）。但宿主只在 `plugin.register` / **配置重载**
+时构建**模型注册表**，`/v1/models` 的增删因此要等宿主重启一次。
+
+**控制台页的处理**：模型区块上方会常驻一条黄色提示条「模型变更待生效，需重启 CPA 生效」。
+手动重启后宿主重建注册表，提示自动消失（插件在 `plugin.register` 时清除该标记）。
+
+> 页面无法重启宿主进程——控制台页是浏览器里的静态页面，且宿主 ABI 没有让插件
+> 终止宿主的接口，所以这里只作提示，不提供按钮。
+
+> Qoder 的模型 ID 用**上游 key**（`gmodel` / `qmodel_38max` / `kmodel_latest` …），
+> 名称列显示 `display_name`（`GLM-5.3` / `Qwen3.8-Max` …）。觉得 key 不好记，用别名换一个即可。
 
 ## 配置项
 
@@ -379,6 +448,7 @@ curl http://127.0.0.1:8317/v1/chat/completions \
 | `auto_tasks` | bool | **`true`** | 每日自动跑任务闭环（连登兑换、抽奖、旅行、夜猫子等） |
 | `zen_base_url` | string | 空 | 覆盖 OpenCode ZEN 上游基地址（默认 `https://opencode.ai/zen`） |
 | `cline_base_url` | string | 空 | 覆盖 Cline 上游基地址（默认 `https://api.cline.bot/api/v1`） |
+| `zcode_base_url` | string | 空 | 覆盖 ZCode **对话**上游基地址（默认 `https://api.z.ai`） |
 
 ## 从旧插件迁移
 
@@ -408,6 +478,8 @@ python3 scripts/migrate_auths.py /path/to/cpa/auths --apply  # 执行
 | POST | `/checkin` | 签到（body `{"account_ids":[...]}`，省略即全部） |
 | POST | `/quotas` | 批量查额度 |
 | GET | `/models` | 读取当前注册的模型清单（读缓存，不打上游） |
+| POST | `/models/toggle` | 批量禁用/启用模型（body `{"models":[...],"disabled":true}`） |
+| POST | `/models/alias` | 设置/清除某个模型的别名（body `{"model":"<vendor>:<官方ID>","alias":"对外ID"}`，`alias` 留空清除） |
 | POST | `/models/refresh` | 从上游拉取模型清单并缓存 |
 | GET | `/logs?since=&limit=` | 读插件日志（环形缓冲，增量拉取） |
 | POST | `/settings` | 改插件运行期设置 |
@@ -426,11 +498,15 @@ python3 scripts/migrate_auths.py /path/to/cpa/auths --apply  # 执行
 
 ## 已知限制
 
-- **模型清单变更后需要重启宿主**：宿主的模型注册表只在插件加载/重载时读取。
+- **模型清单变更后需要一次宿主重载**：宿主的模型注册表只在插件加载/配置重载时读取。
+  禁用/启用的**调用拦截**与别名的**出站翻译**是即时的，只有 `/v1/models` 列表要等重载；
+  控制台页的「应用变更」可触发软重载（见「模型变更的生效」）。
 - **同名模型跨供应商合并**：宿主按 `EqualFold` 合并，选号可能落到另一家。
   用 `vendor:model` 精确指定。
 - **WorkBuddy 国际版没有签到与成长任务**、**Qoder 国际版没有签到计划**：
   这些活动只在国内版提供，入口会被跳过（不报错、不发请求）。
+- **ZCode 没有签到**：其「签到」实质是领取活动套餐，上游强制要求阿里云
+  无痕验证码（无图片可作答），本插件不内置浏览器求解器。额度查询不受影响。
 - **Qoder 上游没有配额重置接口**：额度按计费周期自动恢复。
 - **部分 WorkBuddy 任务不可自动化**：`Expert_Philanthropy` 需要真实捐款
   （服务端校验捐赠回执）。

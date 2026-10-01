@@ -82,7 +82,7 @@ func newClineCoreCredential(native *cline.Credential, fileName string) *core.Cre
 	return &core.Credential{
 		VendorID:     cline.VendorID,
 		Label:        label,
-		UID:          firstNonEmptyString(native.AccountID, native.Email),
+		FileID:       strings.TrimSuffix(strings.TrimSpace(fileName), ".json"),
 		Token:        native.AccessToken,
 		RefreshToken: native.RefreshToken,
 		ExpiresAt:    native.ExpiresAt,

@@ -116,7 +116,7 @@ func TestConsolePagePathsAreDeclared(t *testing.T) {
 	// 页面里通过 MGMT + path 拼接调用接口，因此按已知清单核对。
 	referenced := []string{
 		"/status", "/logs", "/checkin", "/quotas", "/models/refresh",
-		"/settings", "/tasks/scan", "/tasks/run", "/tasks/queue", "/tasks/auto",
+		"/models/alias", "/settings", "/tasks/scan", "/tasks/run", "/tasks/queue", "/tasks/auto",
 		"/keepalive",
 	}
 	for _, path := range referenced {

@@ -288,7 +288,7 @@ func forEachAccount(ctx context.Context, callbackID string, fn func(context.Cont
 		if !okRaw {
 			continue
 		}
-		credential, vendor, errResolve := resolveVendorCredential(ctx, callbackID, raw, entry.AuthIndex, nil)
+		credential, vendor, errResolve := resolveVendorCredential(ctx, callbackID, raw, accountIdentity(entry), nil)
 		if errResolve != nil {
 			logger.Debug("skip account %s: %v", entry.Name, errResolve)
 			continue
@@ -323,7 +323,7 @@ type accountContext struct {
 }
 
 // uid 返回账号标识（用于状态记录）。
-func (a *accountContext) uid() string { return a.credential.UIDValue() }
+func (a *accountContext) uid() string { return a.credential.FileIDValue() }
 
 // label 返回展示名。
 func (a *accountContext) label() string {

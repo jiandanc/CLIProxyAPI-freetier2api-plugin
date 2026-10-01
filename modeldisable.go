@@ -25,8 +25,6 @@ import (
 	"freetier2api-plugin/cpasdk/pluginapi"
 	"freetier2api-plugin/internal/core"
 	"freetier2api-plugin/internal/logger"
-	"freetier2api-plugin/internal/vendors/qoder"
-	"freetier2api-plugin/internal/vendors/qoder/bridge"
 )
 
 var (
@@ -97,18 +95,7 @@ func isModelDisabled(vendorID, modelID string) bool {
 	if disabledCacheSet[bare] {
 		return true
 	}
-	if disabledCacheSet[core.ModelKeyFor(vendorID, bare)] {
-		return true
-	}
-	// 兼容 Qoder 历史配置中以内部 SKU (如 gfmodel) 记录的禁用状态
-	if vendorID == qoder.VendorIDCN || vendorID == qoder.VendorIDGlobal {
-		if sku := bridge.ResolveQoderModelKey(bare); sku != "" && sku != bare {
-			if disabledCacheSet[core.ModelKeyFor(vendorID, sku)] || disabledCacheSet[sku] {
-				return true
-			}
-		}
-	}
-	return false
+	return disabledCacheSet[core.ModelKeyFor(vendorID, bare)]
 }
 
 // vendorForPrefix 把限定前缀（供应商 ID 或区域别名）解析成供应商实例。
@@ -174,13 +161,6 @@ func handleModelsToggle(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 					current[key] = true
 				} else {
 					delete(current, key)
-					prefix, bare := core.SplitModelID(key)
-					if prefix == qoder.VendorIDCN || prefix == qoder.VendorIDGlobal {
-						if sku := bridge.ResolveQoderModelKey(bare); sku != "" && sku != bare {
-							delete(current, core.ModelKeyFor(prefix, sku))
-							delete(current, sku)
-						}
-					}
 				}
 			}
 		}
@@ -190,6 +170,8 @@ func handleModelsToggle(req pluginapi.ManagementRequest) pluginapi.ManagementRes
 		}
 		sort.Strings(next)
 		state.DisabledModels = next
+		// 禁用集合变了：标记「待生效」，提示用户名单需重载才更新。
+		state.RestartPending = true
 		// 锁内只重算内存集合（不含配置并集，避免重入 stateMu）；
 		// mutateState 返回后再刷新完整并集。
 		reloadDisabledModelCache(next)
@@ -269,10 +251,11 @@ func filterDisabledModelsForVendor(vendorID string, models []pluginapi.ModelInfo
 	return out
 }
 
-// withDisabledFlag 给控制台页的模型清单打上禁用标记。
+// withDisabledFlag 给控制台页的模型清单打上禁用标记与别名。
 func withDisabledFlag(models []consoleModel) []consoleModel {
 	for index := range models {
 		models[index].Disabled = isModelDisabled(models[index].VendorID, models[index].ID)
+		models[index].Alias = modelAliasFor(models[index].VendorID, models[index].ID)
 	}
 	return models
 }

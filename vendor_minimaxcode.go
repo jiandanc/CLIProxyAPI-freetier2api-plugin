@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"strings"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
 	"freetier2api-plugin/internal/core"
@@ -64,7 +65,7 @@ func (v *minimaxCodeVendor) Parse(raw []byte, fileName string) (*core.Credential
 		VendorID:     minimaxcode.VendorIDFor(v.region),
 		Region:       string(v.region),
 		Label:        label,
-		UID:          uid,
+		FileID:       strings.TrimSuffix(strings.TrimSpace(fileName), ".json"),
 		Token:        native.AccessToken,
 		RefreshToken: native.RefreshToken,
 		ExpiresAt:    native.ExpiresAt,

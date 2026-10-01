@@ -57,10 +57,6 @@ func (v *qoderVendor) Name() string   { return qoder.VendorNameFor(v.region) }
 func (v *qoderVendor) Region() string { return string(v.region) }
 
 // ModelPrefix 返回空：本供应商用裸模型名注册。
-//
-// Qoder 的模型 ID 用**人类可读名**（GLM-5.3 / Kimi-K3）而不是上游 SKU
-// （gmodel / kmodel_latest）：CPA 的 /v1/models 与客户端下拉只显示模型 ID，
-// 用 SKU 会让用户看到内部代号。代价是老客户端要改 ID，用 extra_models 兼容。
 func (v *qoderVendor) ModelPrefix() string { return "" }
 
 // ---- 凭证 ----
@@ -120,15 +116,16 @@ func newQoderCoreCredential(native *qoder.Credential, vendorID, fileName string)
 	// Qoder 的 PAT 是长期凭证，没有过期时间概念；设备令牌同理。
 	// 因此 ExpiresAt 留 0（表示未知），刷新由宿主按 NextRefreshAfter 驱动。
 	//
-	// UID 直接用文件名（去 .json 后缀）：凭证里没有可靠标识——
-	// device_token 凭证根本没有 email 字段，而签到记录要靠 UID 落状态，
-	// 取不到 UID 就会永远显示「未签到」。文件名由登录流程按供应商命名，天然唯一。
-	uid := strings.TrimSuffix(strings.TrimSpace(fileName), ".json")
+	// 账号身份用文件名（去 .json 后缀）：凭证里没有可靠标识——device_token
+	// 凭证根本没有 email 字段。这不是 Qoder 的特例，而是所有「上游不提供
+	// 用户标识」的供应商的统一做法，见 core.Credential.FileID。
+	// Qoder 的上游协议不需要用户标识，因此 UID 留空。
+	fileID := strings.TrimSuffix(strings.TrimSpace(fileName), ".json")
 	return &core.Credential{
 		VendorID:     vendorID,
 		Region:       string(native.Region),
 		Label:        label,
-		UID:          uid,
+		FileID:       fileID,
 		Token:        native.Token,
 		RefreshToken: native.RefreshToken,
 		AuthMode:     "oauth",
@@ -450,19 +447,21 @@ func (v *qoderVendor) bridgeCacheKey(cred *qoder.Credential) string {
 // ---- 内部工具 ----
 
 // qoderModelsToPluginAPI 把上游模型条目转成宿主契约类型。
+//
+// 模型 ID 用上游的 key（gmodel / qmodel_38max …）——它就是 Qoder 网关真正
+// 接受的标识符，出站无需再翻译；display_name 只作展示名。想换一个更顺手的
+// ID 就在控制台给该模型设别名（别名是注册给宿主的对外 ID）。
 func qoderModelsToPluginAPI(models []bridge.QoderModel) []pluginapi.ModelInfo {
-	bridge.RegisterKnownModels(models)
 	out := make([]pluginapi.ModelInfo, 0, len(models))
 	for _, model := range models {
-		name := strings.TrimSpace(model.DisplayName)
-		if name == "" {
-			name = strings.TrimSpace(model.Key)
-		}
-		if name == "" {
+		id := strings.TrimSpace(model.Key)
+		if id == "" {
 			continue
 		}
-		// 模型 ID 统一转小写（如 "glm-5.3-flash"），与 WorkBuddy 等供应商对齐以便宿主做跨账号路由
-		id := strings.ToLower(name)
+		name := strings.TrimSpace(model.DisplayName)
+		if name == "" {
+			name = id
+		}
 		out = append(out, core.ModelInfoToPluginAPI("", core.ModelDescriptor{
 			ID:                 id,
 			Name:               name,
@@ -545,7 +544,6 @@ func (r *payloadRecorder) Payload() []byte { return r.body }
 // 与 WorkBuddy 一样在包初始化期注册：宿主的 plugin.register 之前就绪，
 // 因此任何时刻调用 core.ResolveVendor 都能拿到完整清单。
 func init() {
-	bridge.RegisterKnownModels(qoder.BundledQoderModels())
 	for _, vendor := range newQoderVendors() {
 		core.RegisterVendor(vendor)
 	}

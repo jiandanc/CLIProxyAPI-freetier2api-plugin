@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"strings"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
 	"freetier2api-plugin/internal/core"
@@ -44,7 +45,7 @@ func (v *traeSoloVendor) Parse(raw []byte, fileName string) (*core.Credential, e
 		VendorID:  traesolo.VendorID,
 		Region:    "cn",
 		Label:     label,
-		UID:       native.UID,
+		FileID:    strings.TrimSuffix(strings.TrimSpace(fileName), ".json"),
 		Token:     native.AccessToken,
 		ExpiresAt: native.ExpiresAt,
 		AuthMode:  "oauth",

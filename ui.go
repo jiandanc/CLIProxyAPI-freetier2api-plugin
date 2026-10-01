@@ -56,7 +56,9 @@ button.act:hover { border-color: var(--accent); color: var(--accent); }
 button.act:disabled { opacity: .5; cursor: not-allowed; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
-th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+/* 单元格一律不换行：表头（如「输出上限」）与别名等内容保持单行；
+   内容总宽超出容器时由外层 #models 横向滚动兜底。 */
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 th { color: var(--muted); font-weight: 500; }
 tr:last-child td { border-bottom: none; }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px;
@@ -65,6 +67,7 @@ tr:last-child td { border-bottom: none; }
 .pill.err { color: var(--err); border-color: var(--err); }
 .pill.warn { color: var(--warn); border-color: var(--warn); }
 .muted { color: var(--muted); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .logbox { max-height: 420px; overflow: auto; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
           background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
 .logbox div { white-space: pre-wrap; word-break: break-all; }
@@ -73,12 +76,25 @@ tr:last-child td { border-bottom: none; }
 label { display: inline-flex; align-items: center; gap: 6px; }
 input[type=text], input[type=number] { padding: 6px 8px; border: 1px solid var(--border);
         border-radius: 6px; background: var(--bg); color: var(--fg); font-size: 13px; }
+/* 表格内联输入：点击别名后出现，贴合表格行高。 */
+input.aliasinput { padding: 3px 6px; width: 100%; min-width: 96px; font-size: 13px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+input.aliasinput:focus { outline: none; border-color: var(--accent); }
+/* 模型表容器：列宽由内容决定，超宽时横向滚动而不是压窄各列。 */
+#models { overflow-x: auto; }
+#models table { width: auto; min-width: 100%; }
+/* 别名的展示态：可点击进入编辑，悬停给出提示。 */
+.aliasview { cursor: pointer; border-bottom: 1px dashed var(--border); padding: 1px 2px; }
+.aliasview:hover { color: var(--accent); border-bottom-color: var(--accent); }
 .banner { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; display: none; transition: opacity .2s ease; }
 .banner.show { display: block; }
 .banner.err { background: rgba(207,34,46,.1); border: 1px solid var(--err); color: var(--err); }
 .banner.ok { background: rgba(26,127,55,.1); border: 1px solid var(--ok); color: var(--ok); }
 .banner.warn { background: rgba(154,103,0,.1); border: 1px solid var(--warn); color: var(--warn); }
 .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.pendingbar { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 13px;
+              background: rgba(154,103,0,.1); border: 1px solid var(--warn); color: var(--warn); }
+.pendingbar[hidden] { display: none; }
 progress { width: 160px; height: 8px; }
 .dropdown { position: relative; display: inline-block; }
 .dropdown-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20;
@@ -109,6 +125,9 @@ progress { width: 160px; height: 8px; }
   </div>
 
   <div id="banner" class="banner"></div>
+  <div id="pendingBar" class="pendingbar" hidden>
+    <span>模型变更待生效，需重启CPA生效。</span>
+  </div>
 
   <section id="view-accounts">
     <div class="card">
@@ -161,7 +180,7 @@ progress { width: 160px; height: 8px; }
         <label>筛选 <input type="text" id="modelFilter" placeholder="如 glm / gpt" style="width:160px"></label>
       </div>
       <div class="hint">
-        对外同名模型自动合并；支持按供应商独立启用或禁用。
+        点击某行「别名」即可编辑（留空=清除）。<b>不同供应商的模型设成同一别名</b>，宿主会当成一个 ID 自动调度。
       </div>
       <div id="models"></div>
     </div>
@@ -646,6 +665,7 @@ progress { width: 160px; height: 8px; }
       var scheduler = status.scheduler || {};
       document.getElementById("scheduleInfo").textContent =
         "下次执行：" + (scheduler.next_at || "-") + " · 任务：" + ((scheduler.next_tasks || []).join(", ") || "无");
+      setPendingBar(!!status.restart_pending);
     }).catch(function (err) { banner("err", err.message); throw err; });
   }
 
@@ -727,7 +747,7 @@ progress { width: 160px; height: 8px; }
       if (!filter) return true;
       var vendor = vendorLabel(m.vendor_id, m.realm);
       var bareID = String(m.id || "");
-      var text = (bareID + " " + String(m.name || "") + " " + vendor).toLowerCase();
+      var text = (bareID + " " + String(m.name || "") + " " + String(m.alias || "") + " " + vendor).toLowerCase();
       return text.indexOf(filter) >= 0;
     });
     // 排序：状态 + 供应商名称 + 模型 ID（启用在上，禁用在下；同状态内按 供应商名称 + 模型 ID 升序）
@@ -760,7 +780,7 @@ progress { width: 160px; height: 8px; }
     }
     var table = el("table");
     var head = el("tr");
-    ["", "供应商", "模型 ID", "名称", "上下文", "输出上限", "推理档位", "能力", "状态"]
+    ["", "状态", "供应商", "模型 ID", "名称", "别名", "上下文", "输出上限", "推理档位", "能力"]
       .forEach(function (name) { head.appendChild(el("th", name)); });
     table.appendChild(head);
 
@@ -775,6 +795,9 @@ progress { width: 160px; height: 8px; }
       checkCell.appendChild(checkbox);
       row.appendChild(checkCell);
 
+      // 状态列：紧挨勾选框，便于对照哪些行被禁用。
+      row.appendChild(cellWith(model.disabled ? pill("已禁用", "err") : pill("正常", "ok")));
+
       // 供应商列
       var vendor = vendorLabel(model.vendor_id, model.realm);
       var vendorCell = el("td");
@@ -787,6 +810,10 @@ progress { width: 160px; height: 8px; }
       row.appendChild(el("td", bareID, "mono"));
 
       row.appendChild(el("td", model.name || "—"));
+
+      // 别名列：行内可编辑，失焦/回车即保存（留空=清除，恢复官方 ID）。
+      row.appendChild(aliasCell(model));
+
       row.appendChild(el("td", model.context_length ? formatTokens(model.context_length) : "—"));
       row.appendChild(el("td", model.max_output_tokens ? formatTokens(model.max_output_tokens) : "—"));
 
@@ -797,10 +824,74 @@ progress { width: 160px; height: 8px; }
       if (model.supports_images) caps.push("图片");
       if (model.supports_tools) caps.push("工具");
       row.appendChild(el("td", caps.join(" · ") || "—", caps.length ? "" : "muted"));
-      row.appendChild(cellWith(model.disabled ? pill("已禁用", "err") : pill("正常", "ok")));
       table.appendChild(row);
     });
     host.appendChild(table);
+  }
+
+  // aliasCell 渲染一个「点击即可编辑」的别名单元格。
+  //
+  // 平时显示当前别名（无别名时显示灰色的「无别名」）；点击空白文本即切换成输入框：
+  // 回车/失焦即保存，Esc 撤销。清空输入框保存 = 清除别名（恢复用官方 ID）。
+  // 每个供应商的每个模型各自独立——提交时带上该模型的 scope_id。
+  function aliasCell(model) {
+    var cell = el("td");
+    var saved = model.alias || "";
+    var key = String(model.scope_id || model.id);
+
+    // 静态展示态：可点击，点击后切换为输入框。
+    var display = el("span", saved || "无别名", "aliasview" + (saved ? " mono" : " muted"));
+    display.addEventListener("click", function () { beginEdit(); });
+
+    function beginEdit() {
+      var input = document.createElement("input");
+      input.type = "text";
+      input.className = "aliasinput";
+      input.value = saved;
+      input.placeholder = String(model.id || "");
+      var done = false;
+
+      // finish 提交并回到展示态。alias 为空即清除。
+      function finish(commit) {
+        if (done) return;
+        done = true;
+        var next = commit ? (input.value || "").trim() : saved;
+        if (next === saved) { restore(); return; }
+        input.disabled = true;
+        api("POST", "/models/alias", { model: key, alias: next }).then(function (data) {
+          if (!data) { restore(); return; }
+          saved = next;
+          model.alias = next;
+          setPendingBar(true);
+          restore();
+        }).catch(function (err) {
+          // 保存失败：回到原值并提示（错误是需要用户知晓的，成功则静默）。
+          banner("err", err.message);
+          restore();
+        });
+      }
+
+      function restore() {
+        cell.textContent = "";
+        display.textContent = saved || "无别名";
+        display.className = "aliasview" + (saved ? " mono" : " muted");
+        cell.appendChild(display);
+      }
+
+      input.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter") { ev.preventDefault(); finish(true); }
+        else if (ev.key === "Escape") { ev.preventDefault(); finish(false); }
+      });
+      input.addEventListener("blur", function () { finish(true); });
+
+      cell.textContent = "";
+      cell.appendChild(input);
+      input.focus();
+      input.select();
+    }
+
+    cell.appendChild(display);
+    return cell;
   }
 
   // selectedModelIDs 取当前勾选的模型（用于批量操作）。
@@ -822,11 +913,22 @@ progress { width: 160px; height: 8px; }
     var verb = disabled ? "禁用" : "启用";
     api("POST", "/models/toggle", { models: ids, disabled: disabled }).then(function (data) {
       if (!data) return;
-      banner("warn", "已" + verb + " " + (data.changed || ids.length) + " 个模型。调用已即时拦截，但列表消除需要重启 cliproxyapi 容器。");
+      banner("warn", "已" + verb + " " + (data.changed || ids.length) + " 个模型。调用已即时拦截；列表更新请点上方「应用变更」或重启宿主。");
+      setPendingBar(true);
       loadModels(false);
     }).catch(function (err) { banner("err", err.message); });
   }
 
+  // ---- 模型变更的生效 ----
+  //
+  // 禁用/启用与别名改的是插件状态，宿主只在重启（重建模型注册表）后更新
+  // /v1/models，因此变更后常驻一条提示条。页面无法重启宿主进程，只作提示。
+  function setPendingBar(show) {
+    var bar = document.getElementById("pendingBar");
+    if (bar) bar.hidden = !show;
+  }
+
+  // formatTokens 把 token 数格式化为可读串。
   function formatTokens(value) {
     var n = Number(value) || 0;
     if (n >= 1048576) return (n / 1048576).toFixed(1).replace(/\.0$/, "") + "M";
