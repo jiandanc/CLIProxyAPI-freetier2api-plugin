@@ -1,0 +1,31 @@
+internal/vendors/workbuddy/credential_test.go
+  s_8639ef37563ff1::t_822ded807797cf 138-142
+internal/vendors/workbuddy/credential.go
+  s_8639ef37563ff1::t_5c34a3b4ee9133 438-445,462-466
+README.md
+  s_8639ef37563ff1::t_0d75ec35d88ab9 715-718
+tests/integration/auth_test.go
+  s_8639ef37563ff1::t_152bb6a2c9b476 123-181
+internal/vendors/cline/credential.go
+  s_8639ef37563ff1::t_6179e01203d07a 118-123,125-128,138-142,150-190
+internal/vendors/cline/credential_test.go
+  s_8639ef37563ff1::t_ab6e77a33c8571 21-27
+internal/app/app.go
+  s_8639ef37563ff1::t_c107a73f570d1b 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.50-trip",
+  "base_commit_sha": "dbd36e2d35547845ec9c3f8da454b0b93152cb78",
+  "prompts": {},
+  "sessions": {
+    "s_8639ef37563ff1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "defd31bf-a725-44d0-b6cf-228fb427217e",
+        "model": "gemini-3.8-flash-n"
+      },
+      "human_author": "junpengchen <junpengchen@trip.com>"
+    }
+  }
+}
