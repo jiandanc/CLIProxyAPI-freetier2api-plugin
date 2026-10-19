@@ -1,0 +1,97 @@
+internal/app/host.go
+  s_45ca35c828d863::t_a8161765d241df 174-178
+internal/vendors/trae/login_test.go
+  s_45ca35c828d863::t_6967fc1d363b66 5,12-13,81-136,138-148,150-183
+  s_45ca35c828d863::t_12ca63fb4a65d3 137
+  s_45ca35c828d863::t_13d8f34d944b64 149
+internal/vendors/codearts/adapter.go
+  s_45ca35c828d863::t_cc53a9a21fdeaf 190-200
+internal/core/capabilities.go
+  s_45ca35c828d863::t_230b586a7ff41e 59-68,84-93,95-96
+  s_45ca35c828d863::t_8eb3404003f3a1 69-83,94
+README.md
+  s_8639ef37563ff1::t_0d75ec35d88ab9 729-732
+  s_45ca35c828d863::t_4ed238678ee01e 145-151,329-334
+  s_45ca35c828d863::t_3a7d0254d66031 700
+internal/admin/vendors.go
+  s_45ca35c828d863::t_a8161765d241df 17-20,30,37-42
+internal/admin/admin_test.go
+  s_45ca35c828d863::t_c943959b6c0f35 22-24,43-50,64-67
+internal/app/authprovider.go
+  s_45ca35c828d863::t_dc550efd71b7b1 506-512,514,519-524,528-530,532-560
+  s_45ca35c828d863::t_13d8f34d944b64 531
+internal/admin/console_test.go
+  s_45ca35c828d863::t_dbc698bebf8031 330-333,335-352
+  s_45ca35c828d863::t_13d8f34d944b64 334
+internal/vendors/codearts/chat.go
+  s_45ca35c828d863::t_ab5560cac3c25d 220-221,223-226
+  s_45ca35c828d863::t_13d8f34d944b64 222
+internal/admin/admin.go
+  s_45ca35c828d863::t_12ca63fb4a65d3 48
+  s_45ca35c828d863::t_a8161765d241df 49,109,203-204
+internal/vendors/codearts/login_test.go
+  s_45ca35c828d863::t_8bf86dae9ba4da 1-3,7-8,10-12,15,17-33,84-102,104-106,145,163-164,169-172,176,180,183,187-191,193-195
+  s_45ca35c828d863::t_85cf2607464318 4-6,9,13-14,16,34-51,53-83,103,107-144,146-162,165-168,173-175,177-179,181-182,184-186,192
+  s_45ca35c828d863::t_d0e6edd6b4ba09 52
+internal/admin/login.go
+  s_45ca35c828d863::t_5dbc094868c815 1-4,6-29,31-71
+  s_45ca35c828d863::t_13d8f34d944b64 5,30
+internal/vendors/trae/adapter.go
+  s_45ca35c828d863::t_f6972c1433239f 194-196,198-205,207-209
+  s_45ca35c828d863::t_13d8f34d944b64 197
+  s_45ca35c828d863::t_d7b86d75e65a4f 206
+internal/admin/login_test.go
+  s_45ca35c828d863::t_1d1dd3dc2e9c74 1-106
+internal/vendors/codearts/login.go
+  s_45ca35c828d863::t_82f13b1b54ba8f 30-32,99-103
+  s_45ca35c828d863::t_bf3bb82915a20d 81,91-98,104-150,159,161-166,169,177,183,205,211,214,216,218,221-254,257-271,274-327
+  s_45ca35c828d863::t_d0e6edd6b4ba09 151-158
+internal/vendors/trae/login.go
+  s_45ca35c828d863::t_e1bc108afc56f9 94,314-320
+  s_45ca35c828d863::t_ce30b0a337a385 447-459,477,525-526,530,537,541-545,547-551,553-563,565-574,576-577,579-595,597-600
+  s_45ca35c828d863::t_13d8f34d944b64 546
+  s_45ca35c828d863::t_81b66ade7ae29e 552,564,575,596
+  s_45ca35c828d863::t_12ca63fb4a65d3 578
+tests/integration/auth_test.go
+  s_8639ef37563ff1::t_152bb6a2c9b476 128-184
+  s_45ca35c828d863::t_dfc331f2972009 6,8-9,16-17,187-290,292-321,324-328
+  s_45ca35c828d863::t_d0e6edd6b4ba09 291
+  s_45ca35c828d863::t_df5baba13ca2ed 322-323
+internal/admin/console.html
+  s_45ca35c828d863::t_885d8e31ef6200 68-71,166-176,1455-1457,1470,1487,1489,1493,1499-1513,1517,1525,1548
+  s_45ca35c828d863::t_13d8f34d944b64 1498
+  s_45ca35c828d863::t_dc13c22c99a4b4 1591-1618,1621-1641
+  s_26a594fa8be4b6::t_0cfbd6e8629462 1619-1620
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.50-trip",
+  "base_commit_sha": "dd8e9225aaaee8f98f1a8c25756862c73a295003",
+  "prompts": {},
+  "sessions": {
+    "s_26a594fa8be4b6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a152b0-c895-7031-ae49-37f9acbf8edb",
+        "model": "deepseek-flash"
+      },
+      "human_author": "junpengchen <junpengchen@trip.com>"
+    },
+    "s_45ca35c828d863": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15336-fda4-7413-9af3-851bfb26ebd0",
+        "model": "space-bunny"
+      },
+      "human_author": "junpengchen <junpengchen@trip.com>"
+    },
+    "s_8639ef37563ff1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "defd31bf-a725-44d0-b6cf-228fb427217e",
+        "model": "gemini-3.8-flash-n"
+      },
+      "human_author": "junpengchen <junpengchen@trip.com>"
+    }
+  }
+}
