@@ -379,19 +379,21 @@ func (v *adapter) bridgeCacheKey(cred *Credential) string {
 
 // modelsToPluginAPI 把上游模型条目转成宿主契约类型。
 //
-// 模型 ID 用上游的 key（gmodel / qmodel_38max …）——它就是 Qoder 网关真正
-// 接受的标识符，出站无需再翻译；display_name 只作展示名。想换一个更顺手的
-// ID 就在控制台给该模型设别名（别名是注册给宿主的对外 ID）。
+// 模型 ID 用规范化后的 slug（如 qwen3.8-flash / deepseek-v4-pro），
+// 并注册到双向映射表中，以便出站时精确还原为上游加密网关所需的官方 Key；
+// DisplayName 原样保留作为展示名。
 func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
-		id := strings.TrimSpace(model.Key)
-		if id == "" {
+		rawKey := strings.TrimSpace(model.Key)
+		if rawKey == "" {
 			return core.ModelDescriptor{}, false
 		}
+		id := CanonicalSlug(model.DisplayName, rawKey)
 		name := strings.TrimSpace(model.DisplayName)
 		if name == "" {
 			name = id
 		}
+		RegisterModelSlug(id, rawKey)
 		return core.ModelDescriptor{
 			ID:                 id,
 			Name:               name,

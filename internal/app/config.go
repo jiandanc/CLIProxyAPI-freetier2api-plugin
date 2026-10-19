@@ -94,7 +94,39 @@ func ensureStateDir(cfg pluginConfig) error {
 	if errMkdir := os.MkdirAll(dir, 0o700); errMkdir != nil {
 		return fmt.Errorf("create state dir %s: %w", dir, errMkdir)
 	}
+	migrateLegacyStateDir(dir)
 	return nil
+}
+
+func migrateLegacyStateDir(targetDir string) {
+	home, errHome := os.UserHomeDir()
+	if errHome != nil || strings.TrimSpace(home) == "" {
+		return
+	}
+	legacyDir := filepath.Join(home, ".cli-proxy-api", "freetier2api")
+	if filepath.Clean(targetDir) == filepath.Clean(legacyDir) {
+		return
+	}
+	legacyState := filepath.Join(legacyDir, admin.StateFileName)
+	if _, errStat := os.Stat(legacyState); errStat != nil {
+		return
+	}
+	targetState := filepath.Join(targetDir, admin.StateFileName)
+	if _, errStat := os.Stat(targetState); errStat == nil {
+		return
+	}
+
+	logger.Info("migrating legacy state dir from %s to %s", legacyDir, targetDir)
+	for _, name := range []string{admin.StateFileName, admin.SaltFileName} {
+		src := filepath.Join(legacyDir, name)
+		dst := filepath.Join(targetDir, name)
+		if data, errRead := os.ReadFile(src); errRead == nil {
+			if errWrite := os.WriteFile(dst, data, 0o600); errWrite == nil {
+				_ = os.Remove(src)
+			}
+		}
+	}
+	_ = os.Remove(legacyDir)
 }
 
 func saltFilePath(cfg pluginConfig) string {

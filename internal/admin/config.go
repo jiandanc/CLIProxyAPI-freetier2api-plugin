@@ -83,7 +83,7 @@ func DefaultPluginConfig() PluginConfig {
 	}
 }
 
-// DefaultStateDir 推断默认状态目录：环境变量 > 宿主凭证目录子路径 > 用户主目录 > 临时目录。
+// DefaultStateDir 推断默认状态目录：环境变量 > 用户主目录 > 临时目录。
 //
 // 三级回退是为了让插件在只读 HOME（容器、CI）里也能起来。
 func DefaultStateDir() string {
@@ -91,10 +91,6 @@ func DefaultStateDir() string {
 		return env
 	}
 	if home, errHome := os.UserHomeDir(); errHome == nil && strings.TrimSpace(home) != "" {
-		cpaDir := filepath.Join(home, ".cli-proxy-api")
-		if info, errStat := os.Stat(cpaDir); errStat == nil && info.IsDir() {
-			return filepath.Join(cpaDir, "freetier2api")
-		}
 		return filepath.Join(home, DefaultStateDirName)
 	}
 	return filepath.Join(os.TempDir(), DefaultStateDirName)

@@ -450,13 +450,13 @@ func TestDefaultStateDirFallback(t *testing.T) {
 		t.Fatalf("defaultStateDir = %q, want %q", dir1, want1)
 	}
 
-	// 2. 存在 ~/.cli-proxy-api（Docker 挂载场景）→ 用其下 freetier2api 子目录
+	// 2. 即使存在 ~/.cli-proxy-api（CPA auth-dir），也不再进入该目录，保持隔离以防被当作凭证扫描
 	cpaDir := filepath.Join(tempHome, ".cli-proxy-api")
 	if errMkdir := os.MkdirAll(cpaDir, 0o755); errMkdir != nil {
 		t.Fatalf("create temp cpa dir: %v", errMkdir)
 	}
 	dir2 := app.DefaultStateDir()
-	want2 := filepath.Join(cpaDir, "freetier2api")
+	want2 := filepath.Join(tempHome, ".freetier2api-plugin")
 	if dir2 != want2 {
 		t.Fatalf("defaultStateDir with cpa dir = %q, want %q", dir2, want2)
 	}

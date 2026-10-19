@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"freetier2api-plugin/internal/core"
@@ -647,10 +648,53 @@ var defaultModelMapping = map[string]string{
 	"gemini": "gmodel",
 }
 
+// CanonicalSlug converts a display name into a standard lowercase slug (e.g. "Qwen3.8-Flash" -> "qwen3.8-flash").
+func CanonicalSlug(displayName, rawKey string) string {
+	trimmed := strings.TrimSpace(displayName)
+	if trimmed == "" {
+		return strings.ToLower(strings.TrimSpace(rawKey))
+	}
+	low := strings.ToLower(trimmed)
+	switch low {
+	case "auto", "performance", "ultimate", "efficient":
+		return low
+	}
+	return strings.ReplaceAll(low, " ", "-")
+}
+
+var (
+	slugMu       sync.RWMutex
+	slugToRawKey = map[string]string{
+		"qwen3.8-flash":     "qfmodel",
+		"qwen3.8-max":       "qmodel_38max",
+		"qwen3.7-max":       "qmodel_latest",
+		"qwen3.7-plus":      "qmodel",
+		"qwen3.7-flash":     "q37fmodel",
+		"deepseek-flash":    "dfmodel",
+		"deepseek-v4-pro":   "dmodel",
+		"glm-5.3-flash":     "gfmodel",
+		"glm-5.3":           "gmodel",
+		"glm-5.1":           "gm51model",
+		"kimi-k3":           "kmodel_latest",
+		"kimi-k2.8-preview": "kmodel",
+		"minimax-m3":        "mmodel",
+		"minimax-m2.7":      "mmodel",
+		"sonus":             "smodel",
+		"cantus":            "cmodel",
+	}
+)
+
+func RegisterModelSlug(slug, rawKey string) {
+	slugMu.Lock()
+	defer slugMu.Unlock()
+	slugToRawKey[strings.ToLower(strings.TrimSpace(slug))] = strings.TrimSpace(rawKey)
+}
+
 // MapModel 解析顺序（当前仅使用静态映射）：
-//  1. defaultModelMapping 精确命中
-//  2. defaultModelMapping 双向 substring 模糊匹配（按 source 长度倒序，最长优先）
-//  3. ToLower 兜底（如客户端传 "Performance" 这种 display_name 大小写）
+//  1. slugToRawKey 精确命中（如客户端传规范化 ID "qwen3.8-flash" -> "qfmodel"）
+//  2. defaultModelMapping 精确命中
+//  3. defaultModelMapping 双向 substring 模糊匹配（按 source 长度倒序，最长优先）
+//  4. ToLower 兜底（如客户端直接传 Qoder 原始 key 如 "Performance"/"dmodel"）
 //
 // agent 由 handler 入口传入并保留用于未来按 agent 区分的扩展；当前不参与映射。
 //
@@ -660,6 +704,14 @@ func MapModel(agent, model string) string {
 	if model == "" {
 		return model
 	}
+
+	mLow := strings.ToLower(strings.TrimSpace(model))
+	slugMu.RLock()
+	if rawKey, ok := slugToRawKey[mLow]; ok {
+		slugMu.RUnlock()
+		return rawKey
+	}
+	slugMu.RUnlock()
 
 	// 内置默认映射兜底
 	if mapped := lookupMapping(model, defaultModelMapping); mapped != "" {
