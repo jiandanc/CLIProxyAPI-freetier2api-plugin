@@ -1,0 +1,22 @@
+tests/live/trae_live_test.go
+  s_e30a1c010673e1::t_21ef6c0f3e09f4 253
+  s_e30a1c010673e1::t_6d5e15512115f2 44-48
+internal/vendors/codearts/login_test.go
+  s_e30a1c010673e1::t_ae2cecc3b95a50 215
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.50-trip",
+  "base_commit_sha": "22275e580ba09db0885610963fa47cb0d94ba0bf",
+  "prompts": {},
+  "sessions": {
+    "s_e30a1c010673e1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4e03c699-9413-476c-936e-281dae6f9d73",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
