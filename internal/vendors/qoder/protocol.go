@@ -649,17 +649,32 @@ var defaultModelMapping = map[string]string{
 }
 
 // CanonicalSlug converts a display name into a standard lowercase slug (e.g. "Qwen3.8-Flash" -> "qwen3.8-flash").
+// Known proprietary codenames are translated to standard model slugs:
+//   - "Sonus" (smodel)  -> "gpt-6-astra"
+//   - "Cantus" (cmodel) -> "claude-fable-5-1"
 func CanonicalSlug(displayName, rawKey string) string {
-	trimmed := strings.TrimSpace(displayName)
-	if trimmed == "" {
-		return strings.ToLower(strings.TrimSpace(rawKey))
+	rawLower := strings.ToLower(strings.TrimSpace(rawKey))
+	switch rawLower {
+	case "smodel":
+		return "gpt-6-astra"
+	case "cmodel":
+		return "claude-fable-5-1"
 	}
-	low := strings.ToLower(trimmed)
-	switch low {
+
+	displayLower := strings.ToLower(strings.TrimSpace(displayName))
+	switch displayLower {
+	case "sonus":
+		return "gpt-6-astra"
+	case "cantus":
+		return "claude-fable-5-1"
 	case "auto", "performance", "ultimate", "efficient":
-		return low
+		return displayLower
 	}
-	return strings.ReplaceAll(low, " ", "-")
+
+	if displayLower == "" {
+		return rawLower
+	}
+	return strings.ReplaceAll(displayLower, " ", "-")
 }
 
 var (
@@ -679,7 +694,10 @@ var (
 		"kimi-k2.8-preview": "kmodel",
 		"minimax-m3":        "mmodel",
 		"minimax-m2.7":      "mmodel",
+		"gpt-6-astra":       "smodel",
 		"sonus":             "smodel",
+		"claude-fable-5-1":  "cmodel",
+		"claude-fable-5.1":  "cmodel",
 		"cantus":            "cmodel",
 	}
 )
