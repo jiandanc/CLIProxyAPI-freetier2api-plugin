@@ -1,0 +1,147 @@
+internal/app/exports.go
+  s_a7cd7bcd986b18::t_d4f9a1fa58c22f 56-60
+  s_55f66bcea90007::t_c5d15c74173f7f 61-65
+internal/hostbridge/management.go
+  s_55f66bcea90007::t_1c0c664a23c966 16-18,20
+.github/workflows/ci.yml
+  s_38f9dffd48eeee::t_9cf4bdfea38b8b 177-178,182-184,186-192,194
+  s_38f9dffd48eeee::t_5f961110a35aa7 126-127,129,132
+internal/admin/console.html
+  s_55f66bcea90007::t_f5360465e9c0e1 1291-1293
+  s_55f66bcea90007::t_2afd6eb83627f3 1287-1290
+  s_55f66bcea90007::t_6de5dcd37dd884 1274-1275
+tests/integration/plugin_models_test.go
+  s_a7cd7bcd986b18::t_bbe7d751dbae2b 399-400,404,412
+  s_a7cd7bcd986b18::t_f610473ca029c2 345,351,363-364,366-368
+  s_a7cd7bcd986b18::t_984e3cf2c90d94 262-265,269-280,283-284,286-288,293-295
+  s_a7cd7bcd986b18::t_185b4cff5a73f3 266,268,281-282,285,289-292
+  s_55f66bcea90007::t_f9b6126e9f48e8 267
+internal/vendors/qoder/models.go
+  s_a7cd7bcd986b18::t_c68e00b61427ce 9-80,82-87,89
+  s_55f66bcea90007::t_97258ffb24fe7b 5-7
+internal/admin/admin.go
+  s_55f66bcea90007::t_49cf93e9003638 28-29
+  s_55f66bcea90007::t_258b08afdc44b1 63-67
+internal/vendors/qoder/adapter.go
+  s_a7cd7bcd986b18::t_7d97c28bd5d0aa 372
+  s_a7cd7bcd986b18::t_07940ea3993b98 43-46
+  s_3bf6fba8f9fa0d::t_034cb193544cf2 400-401
+  s_a7cd7bcd986b18::t_fc08520fd9ca3c 392-394,396,398-399,402-403,408
+  s_a7cd7bcd986b18::t_6bced5aba33796 96
+  s_a7cd7bcd986b18::t_8141911c245b7c 128-129,133
+  s_a7cd7bcd986b18::t_0facee3229ee1f 155-157,170,174
+  s_a7cd7bcd986b18::t_a7c85937717b1a 55
+cpasdk/pluginapi/types.go
+  s_55f66bcea90007::t_8ed6e134f12b97 1381,1393-1403
+internal/admin/catalog.go
+  s_a7cd7bcd986b18::t_02320217762ad2 177,179-182,198-200,202,205,209,213-218
+  s_a7cd7bcd986b18::t_a09be6a2b0008d 206-207,210
+  s_a7cd7bcd986b18::t_33cfd905ad51a3 556-560,572-575,577,579
+  s_55f66bcea90007::t_ea81d4d3d6a4bd 47-49
+  s_55f66bcea90007::t_7337a79e110e39 325-326
+  s_55f66bcea90007::t_75cf129ab3273e 329,336-339,341-342,346-348,350-357,359-378
+  s_55f66bcea90007::t_8f6ebbacc508de 13
+  s_55f66bcea90007::t_4d4dd2e71a9fe5 404
+  s_55f66bcea90007::t_cc343f51088a30 318-324,327-328,330-335,340,343-345,349,358,379-381,389-403,405-415
+  s_55f66bcea90007::t_7208e43d66154a 50-52
+  s_a7cd7bcd986b18::t_46cb964721c7cd 201,204,208
+  s_a7cd7bcd986b18::t_79b5bbf754d9e7 561-562
+  s_55f66bcea90007::t_f6fcaa7be52895 382-388
+  s_55f66bcea90007::t_d64a821f0958cf 63-64
+  s_a7cd7bcd986b18::t_01ff19d8a8dfb4 576
+tests/testhost/host.go
+  s_55f66bcea90007::t_9ca3a2b52fd900 45-46,121-136,160,171
+README.md
+  s_a7cd7bcd986b18::t_ab2729280e8018 72,77,79-80,107
+  s_a7cd7bcd986b18::t_18b39fc787c879 276
+  s_a7cd7bcd986b18::t_0147fec50c1064 420
+  s_a7cd7bcd986b18::t_5a1bb3b0069309 34-71,73-76,78,81-106,109,113-129,132-146,459-468
+  s_a7cd7bcd986b18::t_176eb5b043cce2 130
+  s_a7cd7bcd986b18::t_8dbe5b6f16558d 108,110-112,131,147
+internal/app/models.go
+  s_55f66bcea90007::t_7d35b30463b7b7 70-74
+internal/admin/models.go
+  s_55f66bcea90007::t_f70837370b0068 53-58
+  s_55f66bcea90007::t_c8e305ef9c85fa 98-103
+internal/admin/catalog_test.go
+  s_a7cd7bcd986b18::t_1687d4ca4a99e9 84-94
+  s_5f4b6aa06ee2aa::t_8d62d3bba50c0d 124
+  s_a7cd7bcd986b18::t_db9aac4869dc1a 95-98,101-123,125-127
+  s_a7cd7bcd986b18::t_ddf5f8f85aa850 144
+  s_a7cd7bcd986b18::t_9ded909f67a966 99-100
+  s_a7cd7bcd986b18::t_bcdffd58b035f7 128-133
+  s_a7cd7bcd986b18::t_8a7038cd01da77 137,140-143,145-156
+  s_a7cd7bcd986b18::t_7d9962203f76f3 136,138-139
+internal/vendors/qoder/models_test.go
+  s_a7cd7bcd986b18::t_f5c020e88fe7b2 1-4,7-53,56-59,62-123,125,128-129,131-160,162-164,168-185
+  s_a7cd7bcd986b18::t_482f4216eee9c9 165-167
+  s_a7cd7bcd986b18::t_375c54d00a3a81 161
+  s_a7cd7bcd986b18::t_6b817515c180c0 124,126-127,130
+  s_a7cd7bcd986b18::t_4080e156e534ca 5-6
+internal/vendors/qoder/protocol_test.go
+  s_a7cd7bcd986b18::t_cd1c1beef7cf08 33
+  s_a7cd7bcd986b18::t_2dee1521d1ac3a 8-9,20,30-32,34-64
+internal/app/app.go
+  s_a7cd7bcd986b18::t_bd655bcec970ac 23
+tests/integration/management_resilience_test.go
+  s_55f66bcea90007::t_a94ce7c83ccfaa 1-16,18-27,50-56,58-72,75-77,80-82,98-99,104,107-109,112-215
+  s_55f66bcea90007::t_17a9ef3a8992c1 17
+  s_55f66bcea90007::t_ce6ecf2b965d3d 78-79,83-97,100-103,105-106
+  s_55f66bcea90007::t_25d04c0f4d4676 28-49,57,73-74,110-111
+internal/vendors/qoder/protocol.go
+  s_a7cd7bcd986b18::t_64278d41de98e9 151-153
+  s_a7cd7bcd986b18::t_5c28d78147f70e 175-178
+  s_a7cd7bcd986b18::t_44a94e243f7f28 240
+  s_a7cd7bcd986b18::t_28ffef4339c067 386-388,390
+  s_a7cd7bcd986b18::t_9e058617d90b92 658-677,682-683
+internal/admin/quota.go
+  s_55f66bcea90007::t_2fcee20232dda5 24-37,58-66,81,83,89-96,101-115,117-158,163,166,168-169,171,173,180,182-193,201-220
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "339d90767ef2deb727e317d9927b94c1aed359fa",
+  "prompts": {},
+  "sessions": {
+    "s_38f9dffd48eeee": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ea0f4267-a633-48b2-b11d-771fc1043d0a",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    },
+    "s_3bf6fba8f9fa0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "479948f6-c03a-48ca-9de7-d34d984e1801",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    },
+    "s_55f66bcea90007": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "025a8c78-ba16-45ec-919b-42c4312f5aab",
+        "model": "deepseek-flash"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    },
+    "s_5f4b6aa06ee2aa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f12019eb-5563-4dd8-9c76-a9bb785b9325",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    },
+    "s_a7cd7bcd986b18": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5fb9f85a-7091-4183-8bb1-7a6fc3a2c41d",
+        "model": "deepseek-v4.1-flash-free"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
