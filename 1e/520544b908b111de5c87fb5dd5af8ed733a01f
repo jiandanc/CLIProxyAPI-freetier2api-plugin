@@ -1,0 +1,115 @@
+internal/auth/quota_test.go
+  s_32a596409ea550::t_6b3ef176a01676 1-88
+internal/admin/console_test.go
+  s_554cb9fbf648d5::t_1998e94c8fcb9e 353-374
+tests/integration/response_normalize_test.go
+  s_2897b462aa868d::t_98706466f2b45b 227-235
+  s_2897b462aa868d::t_00aba650674d76 1-20,22-175,178-226,236-254
+  s_2897b462aa868d::t_ce34e63f0c6d12 176-177
+  s_2897b462aa868d::t_93eae1bdf489df 21
+internal/vendors/trae/models.go
+  s_32a596409ea550::t_05b5110782c298 25,212,221
+  s_32a596409ea550::t_21580651649f3e 134-135
+  s_32a596409ea550::t_bab71cab1831e9 10-12
+  s_32a596409ea550::t_f879fead8cf4f0 157-164,167,197-198,206,210,216
+  s_32a596409ea550::t_827774eec926e2 262-266,273-274,276-277,279-280,283
+  s_32a596409ea550::t_d0e2af10b008d5 27
+  s_32a596409ea550::t_18d72b47aa7bf6 272,275,278,281-282,284
+  s_32a596409ea550::t_15db184ea68356 81-83,85
+internal/vendors/trae/tasks.go
+  s_32a596409ea550::t_bb976248d8c0c2 274-276,284-286,290
+tests/integration/quota_capability_test.go
+  s_554cb9fbf648d5::t_7afd8dae513500 128-151
+  s_554cb9fbf648d5::t_24b6ed788f6c4a 1-127
+internal/app/executor.go
+  s_2897b462aa868d::t_ce2e4f7ea78df1 205-211,213-215,217
+internal/app/responsegate.go
+  s_2897b462aa868d::t_0e76a80027d393 1-343
+internal/vendors/trae/protocol_test.go
+  s_32a596409ea550::t_2a992caceab1b6 180-189,323,517,531
+  s_32a596409ea550::t_658581cea19cd4 589-590
+  s_32a596409ea550::t_1245e016c289f2 580,583,586-588
+  s_32a596409ea550::t_781b51a44e0e3d 734-735,737-738,740-741,763
+  s_32a596409ea550::t_9ba1c48e6f1476 545-579,581-582,584-585,591-604
+internal/admin/quota_display_test.go
+  s_554cb9fbf648d5::t_f91661c7962397 4,38-57
+  s_554cb9fbf648d5::t_4250da98f4e15d 10
+internal/admin/accounts.go
+  s_554cb9fbf648d5::t_61a751044e706e 155-163
+  s_554cb9fbf648d5::t_82a68277c0324c 123
+  s_554cb9fbf648d5::t_c92eaf3f127190 70-72
+README.md
+  s_2897b462aa868d::t_39af2e2df414e2 730-740
+  s_32a596409ea550::t_5fe73677bc72aa 651
+internal/auth/quota.go
+  s_32a596409ea550::t_7a12859b1be4e9 43-51,54-57,59,61,63-70,72-74,78,81,86,89-113
+internal/admin/quota.go
+  s_554cb9fbf648d5::t_ff6a0279b6ddaf 26-38,40-41
+  s_554cb9fbf648d5::t_2993f46802a52b 74-75
+  s_554cb9fbf648d5::t_9b09c4ff8f0827 85-90
+  s_32a596409ea550::t_bbfef2786a0378 117-118
+  s_32a596409ea550::t_7da44a6f2b27e6 39
+internal/admin/console.html
+  s_a7cd7bcd986b18::t_870b4d241a179a 839-844
+  s_554cb9fbf648d5::t_ba3e9d01a13270 587-590
+  s_32a596409ea550::t_26828c3af558dc 702-704
+  s_554cb9fbf648d5::t_b8ce844d70f14a 692-694,698
+  s_554cb9fbf648d5::t_54b64d3c56fb39 1790-1792
+  s_554cb9fbf648d5::t_3cf352366ba9cc 1556-1558
+  s_554cb9fbf648d5::t_a095736a4457e3 683-687,689-691,695-697
+  s_554cb9fbf648d5::t_3eadbbd32d04be 1629
+  s_554cb9fbf648d5::t_afcabca3cf6716 854-858
+  s_554cb9fbf648d5::t_65a7f55efcec8f 1875-1876
+internal/vendors/trae/chat.go
+  s_32a596409ea550::t_dffe9345f92a52 8,49-53,55
+tests/integration/quota_capability_generic_test.go
+  s_554cb9fbf648d5::t_e8a845422aa096 59-68
+  s_554cb9fbf648d5::t_f0164f64a45162 1-58,69-71
+internal/vendors/trae/adapter.go
+  s_32a596409ea550::t_2db766ab69bc61 19-27,30,32,34-43
+  s_32a596409ea550::t_6de0ebe4b7330b 124
+  s_32a596409ea550::t_455e5fb60c48cd 144,177,197,210,222,236,248,259
+  s_32a596409ea550::t_c5561b5c0e43ee 11,28-29,31,33
+  s_32a596409ea550::t_37363be0d87547 119-122,125-130
+  s_32a596409ea550::t_4bb8ddfad52f49 114-118,123
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.50-trip",
+  "base_commit_sha": "1e520544b908b111de5c87fb5dd5af8ed733a01f",
+  "prompts": {},
+  "sessions": {
+    "s_2897b462aa868d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1dca348c-592f-4681-98e6-d617b6cfdfb5",
+        "model": "deepseek-v4.1-flash-free"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    },
+    "s_32a596409ea550": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "727f7087-7d51-4bc5-a1ea-562cb80400e7",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    },
+    "s_554cb9fbf648d5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "030183e1-ff5a-448e-a231-67c7131ef32f",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    },
+    "s_a7cd7bcd986b18": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5fb9f85a-7091-4183-8bb1-7a6fc3a2c41d",
+        "model": "deepseek-v4.1-flash-free"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
