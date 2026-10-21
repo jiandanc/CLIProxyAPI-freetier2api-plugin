@@ -1,0 +1,67 @@
+internal/tasks/engine.go
+  s_39a2c8fdcc2a7b::t_e4d26bdb77e1fa 242-248,250
+  s_39a2c8fdcc2a7b::t_9e156f14ca1147 763-768
+internal/vendors/qoder/tasks_live_test.go
+  s_39a2c8fdcc2a7b::t_a5d5d0532121d9 145
+  s_39a2c8fdcc2a7b::t_bd986f7f65b704 106-118
+  s_39a2c8fdcc2a7b::t_800a75ce62a1f6 1-105,119-144,146-147
+internal/vendors/qoder/tasks.go
+  s_2897b462aa868d::t_320477d7dc3c75 299-300
+  s_39a2c8fdcc2a7b::t_0728563deea7d5 442
+  s_39a2c8fdcc2a7b::t_202396fe9784da 253,257-264,271-282,294-297,301-306,327-332,344-365,405-411,413-417,422,428,433-441,443-445,451-465,469-471,473-493,497-509,511-522,524-528,531-545,548,550-551,558-559,563,571-615,617-621,625-629,634-755,760-763,774-776
+  s_39a2c8fdcc2a7b::t_1fcf768a1cab4e 472
+internal/vendors/qoder/adapter.go
+  s_2897b462aa868d::t_5ed0cbc5357470 237-240
+  s_39a2c8fdcc2a7b::t_57f323594bd30f 241-243
+internal/admin/accounts.go
+  s_39a2c8fdcc2a7b::t_e841a756bcba9f 375-380
+  s_39a2c8fdcc2a7b::t_cc35ab83bc45f7 421,427-428
+  s_39a2c8fdcc2a7b::t_3ad2395887b71c 347,350,354,357,360-363
+  s_39a2c8fdcc2a7b::t_d85338a0a0abf8 383-388,396
+internal/admin/console.html
+  s_39a2c8fdcc2a7b::t_7a29d331487af0 1769-1773,1775-1784
+internal/app/executor.go
+  s_39a2c8fdcc2a7b::t_81c7bb2d7a49aa 454-459
+internal/tasks/checkin_record_test.go
+  s_39a2c8fdcc2a7b::t_c242773c34d761 27
+  s_39a2c8fdcc2a7b::t_5de3f786718665 8-9,28-30,36-42
+  s_39a2c8fdcc2a7b::t_8accfaa859a5c6 4
+  s_39a2c8fdcc2a7b::t_28ff0b6f95dfc6 44-51,55,71,91
+  s_39a2c8fdcc2a7b::t_71ef11e0a89a3a 1-3,5-7,10-26,31-35,43,52-54,56-70,72-90,92-103
+internal/app/app.go
+  s_39a2c8fdcc2a7b::t_940d0b477b89a7 23
+README.md
+  s_39a2c8fdcc2a7b::t_a31b76ec625882 862-881
+  s_39a2c8fdcc2a7b::t_1aed6c68881b31 195
+  s_39a2c8fdcc2a7b::t_f3e1488e44639b 729-749
+internal/core/vendor.go
+  s_39a2c8fdcc2a7b::t_8e0178f9677f4b 115-124
+internal/vendors/qoder/tasks_test.go
+  s_39a2c8fdcc2a7b::t_89f84cbf5d422d 391-493
+  s_39a2c8fdcc2a7b::t_9180455f8c7bea 494-495,500-510,512-513
+  s_39a2c8fdcc2a7b::t_121c6d5a89bd73 1-390,496-499,511,514-525
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.50-trip",
+  "base_commit_sha": "1b2c0fa6b6b9ab0904ee54569f579bf8b131e28d",
+  "prompts": {},
+  "sessions": {
+    "s_2897b462aa868d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1dca348c-592f-4681-98e6-d617b6cfdfb5",
+        "model": "unknown"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    },
+    "s_39a2c8fdcc2a7b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f94ef14a-3c14-479e-ad2e-e91add16bcfa",
+        "model": "space-bunny"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
