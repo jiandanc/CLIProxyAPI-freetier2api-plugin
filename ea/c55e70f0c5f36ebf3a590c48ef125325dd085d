@@ -1,0 +1,83 @@
+internal/core/vendor.go
+  s_55f66bcea90007::t_e0ed815ed97461 185
+tests/integration/management_resilience_test.go
+  s_55f66bcea90007::t_c696a078434814 224-226,230,234,238,242,248,262-263
+  s_55f66bcea90007::t_38c491d0df1355 326-333,336-338,340,345,349-359,361-368,474-478,485-486
+  s_55f66bcea90007::t_db0e7d3d2bd2e6 369-394
+  s_55f66bcea90007::t_3b2d817a84ddf8 401-404,409-410,416-425,427,430,436,438,444,446-449,452-453,461-465
+  s_55f66bcea90007::t_6188664cd2fd29 334-335,339,341-344,346-348,360,469-473,479-484
+  s_55f66bcea90007::t_ad39d4793ffb0f 20-21,218-223,227-229,231-233,235-237,239-241,243-247,249-261,264-324
+  s_55f66bcea90007::t_7714b1ff7913ab 395-400,405-408,411-415,426,428-429,431-435,437,439,441-443,445,450-451,454-460,466-468
+internal/admin/console_test.go
+  s_55f66bcea90007::t_d5d6f6f37a2374 424-425
+  s_55f66bcea90007::t_29bbec10012a4c 413-423,426-435
+  s_5f4b6aa06ee2aa::t_20610d7fc5548f 375-412
+internal/app/models.go
+  s_55f66bcea90007::t_e74c30342a21ec 74-79
+internal/admin/catalog.go
+  s_55f66bcea90007::t_291362932e70c3 343,345-347,352-355,358
+  s_55f66bcea90007::t_eaf0c5044fd069 359
+  s_55f66bcea90007::t_e222e7c6252e3b 303-305,314-318,323-324,334-342,344,349-350
+  s_55f66bcea90007::t_2d98102061517a 322
+  s_55f66bcea90007::t_8b9a26805dced8 380-381,390-391,402-405,462-464,469-471,474-478,480-483,485-491
+  s_55f66bcea90007::t_edaf39c8f9d06d 313,319-321,325-333
+  s_55f66bcea90007::t_3df50c9bf2920a 367-373
+  s_55f66bcea90007::t_9a87cff9f068aa 728,731-732,762,765
+README.md
+  s_5f4b6aa06ee2aa::t_3dd232083be960 442-443
+  s_5f4b6aa06ee2aa::t_f8221e9b5a9bc8 128-129
+internal/vendors/workbuddy/adapter.go
+  s_55f66bcea90007::t_8c2f12a0f6bcc3 757
+internal/admin/models.go
+  s_55f66bcea90007::t_5181103b0080de 97
+internal/core/host.go
+  s_55f66bcea90007::t_df2f3ff4c2775b 39-48
+internal/admin/catalog_test.go
+  s_55f66bcea90007::t_54d8e163ab0b20 192-218,221-223,232,235-236
+  s_55f66bcea90007::t_3b4bfe308bb8ed 219-220,224-229,237-240
+internal/auth/pool.go
+  s_55f66bcea90007::t_a6dd65650fc25e 76
+internal/hostbridge/auth.go
+  s_55f66bcea90007::t_2e44f4d2e7fb03 301
+internal/admin/console.html
+  s_5f4b6aa06ee2aa::t_cc9dec1960955b 1270-1272
+  s_5f4b6aa06ee2aa::t_96c493bf730ffe 766
+  s_5f4b6aa06ee2aa::t_58e1d086de8c6c 767-772
+  s_5f4b6aa06ee2aa::t_4dcadfb637e2c5 1242-1244,1251-1252
+  s_5f4b6aa06ee2aa::t_33f893cd5eec29 1337,1341-1361
+  s_5f4b6aa06ee2aa::t_565a7872954585 1198-1199
+  s_55f66bcea90007::t_ae26e3ae21d23a 1785
+internal/app/app.go
+  s_55f66bcea90007::t_9082dfdf7c055a 23
+tests/testhost/host.go
+  s_55f66bcea90007::t_d8294e3cd13f13 114-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "eac55e70f0c5f36ebf3a590c48ef125325dd085d",
+  "prompts": {},
+  "humans": {
+    "h_b53cc48647c163": {
+      "author": "jiandanc <jiandanc@126.com>"
+    }
+  },
+  "sessions": {
+    "s_55f66bcea90007": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "025a8c78-ba16-45ec-919b-42c4312f5aab",
+        "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    },
+    "s_5f4b6aa06ee2aa": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f12019eb-5563-4dd8-9c76-a9bb785b9325",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
