@@ -1,0 +1,177 @@
+internal/app/app.go
+  s_78d6cea7ee6401::t_2718d9dce45138 23
+tests/integration/plugin_models_test.go
+  s_f6ef687476377b::t_86bde302370b73 478
+internal/core/core_test.go
+  s_bd9e5332ccab38::t_cd32e29f0f5605 296-305,308-318
+internal/vendors/qoder/adapter.go
+  s_78d6cea7ee6401::t_b41fa6dac8ccdc 21
+  s_78d6cea7ee6401::t_aa41020ccbf29d 265
+  s_78d6cea7ee6401::t_680cefda836013 281-288
+  s_bd9e5332ccab38::t_14eafc365250eb 440-441,454-456,467-472,474,477,480-481,485-488,490-493
+  s_78d6cea7ee6401::t_9afda772795c42 105,109-115
+  s_78d6cea7ee6401::t_4a362d2f51d0ea 54-55
+  s_78d6cea7ee6401::t_b8d80a469346c0 266,289-293
+  s_bd9e5332ccab38::t_984d12bf12cfca 48-53
+  s_bd9e5332ccab38::t_a34d131e7cf144 473
+  s_bd9e5332ccab38::t_bb81cc18ea9b8d 475-476,478-479,482-484
+  s_78d6cea7ee6401::t_b7eed21a3bceb7 257-259,264
+  s_78d6cea7ee6401::t_8629937731b264 260-263
+  s_bd9e5332ccab38::t_49f4a2f416a04a 489,494
+internal/vendors/workbuddy/adapter.go
+  s_bd9e5332ccab38::t_b54ba7902af58a 461-464,467-471
+  s_bd9e5332ccab38::t_3cb24c016e8ca4 454,460,465-466
+internal/vendors/workbuddy/models.go
+  s_bd9e5332ccab38::t_eaa3b1096fdb45 351
+internal/vendors/qoder/identity.go
+  s_78d6cea7ee6401::t_d652d1be905507 1-20,29-56,58-103
+  s_78d6cea7ee6401::t_ae346f09d36625 57
+  s_78d6cea7ee6401::t_357a706a7096e9 21-28
+internal/vendors/qoder/tasks_live_test.go
+  s_78d6cea7ee6401::t_c02b49d14b336f 35-41,132-135,155
+tests/integration/vendor_compat_test.go
+  s_78d6cea7ee6401::t_4e8dea578da5f6 78-79
+internal/vendors/qoder/models_test.go
+  s_bd9e5332ccab38::t_56c3dd25f9a76f 200-201
+  s_bd9e5332ccab38::t_82c941a5620cbf 186-199,202-211
+internal/admin/models.go
+  s_bd9e5332ccab38::t_172f32f643180e 109
+  s_bd9e5332ccab38::t_6fbdc5cad76fa9 110-111,113-121,123-126
+  s_bd9e5332ccab38::t_b8ba6f168ff709 127,133
+internal/admin/catalog.go
+  s_bd9e5332ccab38::t_c9f3b71bcb4ea7 371,379,383-385
+  s_bd9e5332ccab38::t_96ab489476459a 550,556-557,564-565,569,572-573
+  s_bd9e5332ccab38::t_b5960acf860a67 328,349-350,361-362,364,370,372,380-382,389-394
+  s_bd9e5332ccab38::t_e18505b5942c89 386-388
+  s_bd9e5332ccab38::t_0397df4f95406a 555,566,568,614-617,619,621-631
+  s_bd9e5332ccab38::t_29d82346aa8030 440
+  s_bd9e5332ccab38::t_240f9836deb6be 375-378
+  s_bd9e5332ccab38::t_e3166a9d0685b3 222
+  s_bd9e5332ccab38::t_99a205c32a5fed 591-593,597,600,603-604,606-608,620
+  s_bd9e5332ccab38::t_8f7ab24361654b 319-321,324
+  s_bd9e5332ccab38::t_22216802a3fdf9 358-359,363,373
+  s_bd9e5332ccab38::t_193765d4b0ce4d 45-46,55-67,75
+  s_bd9e5332ccab38::t_c826256dd218b5 369,374
+  s_bd9e5332ccab38::t_f317690e5f5d9f 429
+  s_bd9e5332ccab38::t_25e772a92e3620 348,360,365
+  s_bd9e5332ccab38::t_74c727cdc57131 357
+  s_bd9e5332ccab38::t_981a4bbe0aed0a 563,567
+  s_bd9e5332ccab38::t_c359bf3c374d7c 618
+internal/admin/console.html
+  s_bd9e5332ccab38::t_27b48b0ba0d98b 1166-1169
+  s_bd9e5332ccab38::t_73b6d429ed8d15 54-60,66-67,73-74,78,82
+  s_bd9e5332ccab38::t_565a01866c0ac1 114,118,121-122,138
+  s_bd9e5332ccab38::t_137bd0c6233964 151
+  s_bd9e5332ccab38::t_4e0a2cd7524935 1311,1313-1319
+  s_bd9e5332ccab38::t_60a567263c08c6 1195,1225-1237,1259-1261,1278-1293,1307-1308,1310,1312,1320-1325,1328-1330
+  s_bd9e5332ccab38::t_d5b0633a271d86 2030,2032,2036-2039,2041-2043,2053-2082
+  s_bd9e5332ccab38::t_b5672fafcf306a 2033,2040,2044,2046-2052
+  s_bd9e5332ccab38::t_982e3dec16b862 1165,1170-1171
+  s_bd9e5332ccab38::t_8c20077c0868f1 2031,2034-2035,2045
+  s_bd9e5332ccab38::t_59bb406ad13a58 127-128,130
+  s_bd9e5332ccab38::t_9563b0c2250916 1335-1339,1368-1372,1375-1377,1379,1382,1385
+  s_bd9e5332ccab38::t_6d3906f5cafd55 115-116,119-120,123-126,129,131-137,139-143
+  s_bd9e5332ccab38::t_935785fc08828f 1156-1164,1172-1175,1177-1178,1180-1182,1184-1190,1193,1196,1198,1208,1210-1213,1219-1224,1238-1240,1242,1244-1247,1304,1343,1345,1347-1356,1358-1360,1362-1364,1380-1381,1383-1384,1386,1389-1390,1392-1394,1396,1400-1402,1404-1416,1423-1424,1427-1429,1433,1436,1441,1445,1449,1451-1453,1457-1458,1460,1468-1471
+  s_bd9e5332ccab38::t_166d78a3cdb4b8 61-65,68-72,75-77,79-81,83-89
+  s_bd9e5332ccab38::t_ed33542087561b 1403
+  s_bd9e5332ccab38::t_677b0329ea5611 144-150,152-156
+  s_bd9e5332ccab38::t_5cd72a3c3f7c16 295
+  s_bd9e5332ccab38::t_b8fbab1d5292c8 52-53
+  s_bd9e5332ccab38::t_3a4b1f0fa1ac4d 1309,1326-1327
+  s_bd9e5332ccab38::t_f7a98c45648821 1176,1179,1183,1191-1192,1194,1197,1199-1207,1209,1214-1218,1241,1243
+  s_bd9e5332ccab38::t_acead4a3cfada6 157
+  s_bd9e5332ccab38::t_c06a3b9f6a8539 2001
+  s_bd9e5332ccab38::t_01e98d9de1d5e5 293-294,296-297,300
+  s_bd9e5332ccab38::t_9564f4f243950e 1367,1373-1374
+internal/vendors/qoder/tasks.go
+  s_78d6cea7ee6401::t_035b55b0ec0c68 377-380,388
+  s_78d6cea7ee6401::t_00a02b3e9d0b96 421-422
+  s_78d6cea7ee6401::t_3f521792320946 603,608
+  s_78d6cea7ee6401::t_181f504da32289 574
+  s_78d6cea7ee6401::t_a2a8c7f4d0869e 641,643
+  s_78d6cea7ee6401::t_3687238bea32d9 767-768
+  s_78d6cea7ee6401::t_bec692efa3c1e1 819-825,828-838
+  s_78d6cea7ee6401::t_63ba7c171991dd 389
+  s_78d6cea7ee6401::t_a70e4dc3f7cefe 815-818,826-827,839-840
+  s_78d6cea7ee6401::t_843e7cfd0818f3 852,867
+  s_78d6cea7ee6401::t_1850b92cbc330d 486
+  s_78d6cea7ee6401::t_aacac99f549d38 545,551
+internal/admin/catalog_test.go
+  s_bd9e5332ccab38::t_33aca4363fe034 29-36
+  s_bd9e5332ccab38::t_4333143be5d01f 315-316
+  s_bd9e5332ccab38::t_fd866099f0843c 254-276,278-282,285-314,317-318
+  s_bd9e5332ccab38::t_606b5b78a708a7 277,283-284
+internal/vendors/qoder/tasks_test.go
+  s_78d6cea7ee6401::t_50c986e283179b 87,89,91
+  s_78d6cea7ee6401::t_bb3138c5a29c61 131,133-137
+  s_78d6cea7ee6401::t_6ee855264a287a 88,90,92-130,132,138-156
+  s_78d6cea7ee6401::t_1fefd222c589d7 213,263,295,331,376,407,440,489,546
+internal/vendors/cline/adapter.go
+  s_bd9e5332ccab38::t_3f998aa0196e60 109-117
+  s_bd9e5332ccab38::t_ddafa6d1f5a57d 15
+  s_bd9e5332ccab38::t_a08d0d535a22d1 28-30
+  s_bd9e5332ccab38::t_25b5ea10e7ec6e 164-191
+internal/core/capabilities.go
+  s_bd9e5332ccab38::t_1768883b54db7a 143,150-151,154-165,167-168
+  s_bd9e5332ccab38::t_5e80968ede03fa 185-203,207-212
+  s_bd9e5332ccab38::t_b84899949dfb0e 14
+  s_bd9e5332ccab38::t_26b6c0cc1f08b1 145-147,169-170
+  s_bd9e5332ccab38::t_ac4b8ec8ef7cd7 16-17
+  s_bd9e5332ccab38::t_4eca1cfa808f39 141-142,144,148-149
+  s_bd9e5332ccab38::t_6ed3f0f8dee824 221,223-224
+  s_bd9e5332ccab38::t_d9be814e32964f 204-206
+  s_bd9e5332ccab38::t_c0df0d7f8fba45 152-153,166
+internal/core/credential.go
+  s_bd9e5332ccab38::t_b9a977751c88ac 220-224
+internal/vendors/qoder/identity_test.go
+  s_78d6cea7ee6401::t_c2eb8e38b3a40e 1-98
+internal/vendors/qoder/chat.go
+  s_78d6cea7ee6401::t_4d29fb8426478a 1098-1099,1101-1102,1104-1105,1107
+  s_78d6cea7ee6401::t_de7347bdec9e37 1096-1097
+  s_78d6cea7ee6401::t_5c0e4543a0a92a 1103,1106
+internal/vendors/cline/adapter_test.go
+  s_bd9e5332ccab38::t_d021ef55d55c92 16-39
+README.md
+  s_78d6cea7ee6401::t_5ec6285646640b 454-459
+  s_bd9e5332ccab38::t_3249f6d7fbfe9a 114-118,121
+  s_78d6cea7ee6401::t_d20c6b9e6b1229 410
+  s_bd9e5332ccab38::t_e535f4f438e4b1 119-120
+  s_bd9e5332ccab38::t_8fcc0b6e0761cf 122
+internal/admin/console_test.go
+  s_bd9e5332ccab38::t_15485c778ce089 436-448,456-478,481-490,492-493,495-500,504,506-508,517,521-522,526-527
+  s_bd9e5332ccab38::t_75292296632168 453-455
+  s_bd9e5332ccab38::t_191a1fd383e1e1 479-480,491,494,501-503,505,509-516,518-520,523-525
+  s_bd9e5332ccab38::t_afe217745d3aec 449-452
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "7ae747fa5713280d02af7b768392ab51ff2920e4",
+  "prompts": {},
+  "sessions": {
+    "s_78d6cea7ee6401": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3121f86-89ff-49bd-89e4-7b2c819daec9",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    },
+    "s_bd9e5332ccab38": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e3333982-7194-4fde-8847-dbd8a5cd2af0",
+        "model": "gemini-3.8-flash-control"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    },
+    "s_f6ef687476377b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e4f60d31-b895-46dc-a80d-55210e4f54b2",
+        "model": "unknown"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
