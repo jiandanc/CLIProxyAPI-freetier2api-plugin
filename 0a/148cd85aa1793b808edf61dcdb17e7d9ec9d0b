@@ -1,0 +1,51 @@
+internal/vendors/qoder/adapter.go
+  s_78d6cea7ee6401::t_e4e75dd9e7669b 257-260
+  s_78d6cea7ee6401::t_03d6b25c5760ea 288-290
+internal/vendors/qoder/identity_test.go
+  s_78d6cea7ee6401::t_b4e6f3d739f161 7,9-21,23-31,33-34,36-37,41-49,51-62,64-79,81-88,90-97,101-110,116,120,143-174
+internal/vendors/qoder/tasks.go
+  s_78d6cea7ee6401::t_3f19a7c5533426 378-380
+  s_78d6cea7ee6401::t_9b7a21c3dbfed6 537,541-550
+  s_78d6cea7ee6401::t_1f6ae00f866634 829-832,835-848
+internal/vendors/qoder/credential.go
+  s_78d6cea7ee6401::t_8d48d7b1212e34 125-127,131-138
+  s_78d6cea7ee6401::t_c08a41714a1b11 68-76
+README.md
+  s_78d6cea7ee6401::t_1b9ca54bbb65dd 92
+  s_78d6cea7ee6401::t_92a1d971da22a8 455-465
+  s_78d6cea7ee6401::t_fd05ef87453386 411
+internal/app/app.go
+  s_6ea54305f261ad::t_7641e2f4c0eb66 23
+internal/vendors/qoder/identity.go
+  s_78d6cea7ee6401::t_f3922854b68f22 3,5-6,8-10,12-23,33,36-37,42,48,50-53,55,57-60,62-68,70
+internal/vendors/qoder/tasks_live_test.go
+  s_78d6cea7ee6401::t_375dd9c10cb9a6 35,37-44
+  s_78d6cea7ee6401::t_5ba0cd5280edc7 137
+internal/vendors/qoder/tasks_test.go
+  s_78d6cea7ee6401::t_6d8cdd5b641cd1 140,143-145,157-159
+  s_78d6cea7ee6401::t_4feea62d2c198f 87,89-90,92-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "0a148cd85aa1793b808edf61dcdb17e7d9ec9d0b",
+  "prompts": {},
+  "sessions": {
+    "s_6ea54305f261ad": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0be0785c-f073-4219-8389-1ae29bc7bd85",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    },
+    "s_78d6cea7ee6401": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b3121f86-89ff-49bd-89e4-7b2c819daec9",
+        "model": "deepseek-v4.1-flash-free"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
