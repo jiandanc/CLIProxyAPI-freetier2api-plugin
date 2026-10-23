@@ -1,0 +1,103 @@
+internal/admin/authfile.go
+  s_c4e9b80b91121c::t_6508ecb3ac8ef8 76-79
+  s_c4e9b80b91121c::t_9e82a79c99e878 108-109,115,117-119
+  s_c4e9b80b91121c::t_ea53179795994d 3-5,8-9,19,59-61,66,71-75,82-83,87-107,110-114,116,120-125
+  s_c4e9b80b91121c::t_ae1cbccc0efc38 62-65,67-70,80-81,84-86
+tests/architecture_test.go
+  s_c4e9b80b91121c::t_ba398eef69ae90 226-233,247-252
+internal/auth/quota.go
+  s_c4e9b80b91121c::t_fc0d16b3643c78 57-62,67,78,86,88-90,93-95,97-102,104-109,112-115,118-142,144-150
+internal/admin/admin.go
+  s_c4e9b80b91121c::t_47b36cb0bd8ed5 279-283,285,287,291
+  s_c4e9b80b91121c::t_8bcadf21d6d8e4 273-276,288-290,295-297
+  s_c4e9b80b91121c::t_1a747c90adeb8f 277-278
+internal/auth/quota_test.go
+  s_c4e9b80b91121c::t_ab5b8d5d36aae6 91-98
+  s_c4e9b80b91121c::t_870a93030b3c9a 67-90
+internal/admin/json_body_test.go
+  s_c4e9b80b91121c::t_d8a0181715522d 11-14,20,22-36,38-39,49-50,57-61,63-64,77-78,81-82,86-106
+  s_c4e9b80b91121c::t_ea53179795994d 65-76
+  s_c4e9b80b91121c::t_492787c6971d3b 15,18-19,21
+internal/vendors/qoder/login.go
+  s_c4e9b80b91121c::t_16f59fabca5b76 153-156
+internal/hostbridge/auth_test.go
+  s_c4e9b80b91121c::t_7274ad5e67e7f1 4-5,48-79
+internal/vendors/qoder/protocol.go
+  s_c4e9b80b91121c::t_16f59fabca5b76 135-138
+internal/admin/quota.go
+  s_c4e9b80b91121c::t_b4ff87787fa53b 67-68
+internal/vendors/qoder/chat_test.go
+  s_c4e9b80b91121c::t_8c426b95eb36a9 14
+internal/admin/accounts.go
+  s_c4e9b80b91121c::t_3ff88d0213db4d 317-318
+  s_c4e9b80b91121c::t_8bb28671704b93 192-193
+  s_c4e9b80b91121c::t_7bdea43d7de833 240-241
+  s_c4e9b80b91121c::t_c1497110181e6d 258-259
+tests/integration/testutil_test.go
+  s_c4e9b80b91121c::t_7d2ed990c102ee 15,20-21
+  s_c4e9b80b91121c::t_5eda5eb0807753 210-237
+internal/admin/models.go
+  s_c4e9b80b91121c::t_2f53bbe9bdb016 198-203
+  s_c4e9b80b91121c::t_078935ba0dac1b 232-237
+  s_c4e9b80b91121c::t_acd956f893bc55 240-242
+  s_c4e9b80b91121c::t_8803538ce74015 206-208
+internal/admin/tasks.go
+  s_c4e9b80b91121c::t_04f38a586f1150 11
+  s_c4e9b80b91121c::t_46f6542e0843da 21-22
+  s_c4e9b80b91121c::t_bf7fd26797ee0e 23-24,26-27,34-39
+  s_c4e9b80b91121c::t_3ad6c02aca18c0 43-44
+  s_c4e9b80b91121c::t_448ed8e89f2550 25
+internal/admin/accounts_delete_test.go
+  s_c4e9b80b91121c::t_26df14c1deadc0 62-67,69-70,72,74,77-81
+  s_c4e9b80b91121c::t_f05120028353ff 3,9-13,16,20-21,24-61,68,71,73,75-76,82-149
+internal/vendors/qoder/chat.go
+  s_c4e9b80b91121c::t_fa9e5945479799 776-779,784,788-789
+tests/integration/account_delete_test.go
+  s_c4e9b80b91121c::t_0b80bd847b45df 12-13,26-43,45-58,61-62,64-66,68-69,71,113-114,116,142-143,145,164-190
+  s_c4e9b80b91121c::t_b0f21f4eb07c28 74-85,87-94,96-104
+internal/admin/plans.go
+  s_c4e9b80b91121c::t_ba46854b18476b 113-114
+  s_c4e9b80b91121c::t_2fe818e2420918 81-82
+internal/admin/login.go
+  s_c4e9b80b91121c::t_d23cd189a045fb 30-37
+internal/vendors/qoder/tasks.go
+  s_c4e9b80b91121c::t_7b18c155e84357 892-895
+  s_c4e9b80b91121c::t_0cba8a764afd6c 103
+tests/integration/quota_capability_test.go
+  s_c4e9b80b91121c::t_9238ea37ef0f3a 21
+internal/vendors/workbuddy/tasks_claim_test.go
+  s_c4e9b80b91121c::t_8d5e93afce560f 18,65,84
+  s_c4e9b80b91121c::t_ca4cc7b21e5243 1-17,19-64,66-83,85-98
+internal/hostbridge/auth.go
+  s_c4e9b80b91121c::t_478d1e4e479043 132
+  s_c4e9b80b91121c::t_d6f44d5b1b99cb 10
+  s_c4e9b80b91121c::t_5219a9057e2212 305
+  s_c4e9b80b91121c::t_9081c621f29e52 56-78
+internal/tasks/api.go
+  s_c4e9b80b91121c::t_44d07362c14c4f 13-17,23-27,41-42
+internal/hostbridge/http.go
+  s_c4e9b80b91121c::t_2a80f4f192247f 277-278
+  s_c4e9b80b91121c::t_95e74f797cd015 274-276,316
+internal/vendors/workbuddy/tasks.go
+  s_c4e9b80b91121c::t_3f8e084f4c48cd 1544-1549,1554,1556,1561,1563
+  s_c4e9b80b91121c::t_dcfaa7185265b1 248-254,257-259,264-265,267,270-276
+  s_c4e9b80b91121c::t_9af0410720d0aa 1473-1476,1489-1492
+internal/admin/settings.go
+  s_c4e9b80b91121c::t_73df65f1ea7b12 28-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "ad667eaf5cb627258e702c951145da0bf3f5f2df",
+  "prompts": {},
+  "sessions": {
+    "s_c4e9b80b91121c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b2ed0954-6053-49d9-b1ce-d25030d861a9",
+        "model": "deepseek-v4.1-flash"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
