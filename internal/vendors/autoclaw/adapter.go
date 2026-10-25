@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
@@ -40,6 +41,10 @@ type adapter struct {
 	region Region
 	// baseURL 是区域基地址覆盖（Configure 填充，空表示用默认值）。
 	baseURL string
+
+	// credits 缓存最近一轮目录探测的倍率表（官方模型 ID → 展示文案）。
+	creditsMu sync.RWMutex
+	credits   map[string]string
 }
 
 // Instances 构造 AutoClaw 的两个区域实例。
@@ -155,7 +160,7 @@ func (v *adapter) StaticModels(ctx context.Context) ([]pluginapi.ModelInfo, erro
 	if errModels != nil {
 		return nil, errModels
 	}
-	return modelsToPluginAPI(models), nil
+	return v.modelsToPluginAPI(models), nil
 }
 
 // ModelsForAuth 返回该凭证可用的模型。
@@ -174,11 +179,24 @@ func (v *adapter) ModelsForAuth(ctx context.Context, cred *core.Credential) ([]p
 		logger.Info("autoclaw: model probe failed: %v", errModels)
 		return nil, nil
 	}
-	return modelsToPluginAPI(models), nil
+	return v.modelsToPluginAPI(models), nil
 }
 
-// modelsToPluginAPI 把上游模型条目转成宿主契约类型。
-func modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
+// modelsToPluginAPI 把上游模型条目转成宿主契约类型，顺带记下倍率表。
+//
+// 倍率与清单必须出自同一轮探测：分开取会出现「模型换了一批、倍率还是
+// 上一批」的错配。AutoClaw 的倍率是上游的计费档位文案（低/中/高），
+// 原样透传，不做数字换算。
+func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
+	credits := make(map[string]string, len(models))
+	for _, model := range models {
+		if label := core.FormatRate(model.Credits); label != "" {
+			credits[model.ID] = label
+		}
+	}
+	v.creditsMu.Lock()
+	v.credits = credits
+	v.creditsMu.Unlock()
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		id := strings.TrimSpace(model.ID)
 		if id == "" {
@@ -195,6 +213,20 @@ func modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 			CanDisableThinking: !model.IsReasoning,
 		}, true
 	})
+}
+
+// ModelCredits 实现 core.CreditsProvider：返回「官方模型 ID → 计费档位」。
+func (v *adapter) ModelCredits() map[string]string {
+	v.creditsMu.RLock()
+	defer v.creditsMu.RUnlock()
+	if len(v.credits) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(v.credits))
+	for id, value := range v.credits {
+		out[id] = value
+	}
+	return out
 }
 
 // ---- 执行 ----
@@ -316,6 +348,7 @@ var (
 	_ core.QuotaProvider        = (*adapter)(nil)
 	_ core.Refresher            = (*adapter)(nil)
 	_ core.StorageMerger        = (*adapter)(nil)
+	_ core.CreditsProvider      = (*adapter)(nil)
 )
 
 // 编译期断言（登录能力随实例类型分派）。

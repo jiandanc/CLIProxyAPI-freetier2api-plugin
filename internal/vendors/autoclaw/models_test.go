@@ -12,6 +12,7 @@ package autoclaw
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -103,5 +104,67 @@ func TestFetchModelsErrorsOnUnknownShape(t *testing.T) {
 	}
 	if !strings.Contains(errFetch.Error(), "0 model") {
 		t.Fatalf("error = %v, want it to mention 0 model", errFetch)
+	}
+}
+
+// TestFetchModelsParsesCreditLevel 锁定计费档位的透传。
+//
+// 上游 creditConsumptionLevel 是文字档位（低/中/高），不是折扣倍数；原样
+// 透传到倍率列，缺失则留空（控制台显示「—」，不能写成免费）。
+func TestFetchModelsParsesCreditLevel(t *testing.T) {
+	baseURL := serveModels(t, `{"models":[
+	 {"id":"zai_auto","creditConsumptionLevel":"中"},
+	 {"id":"zai_auto-fast","creditConsumptionLevel":"低"},
+	 {"id":"numeric","creditConsumptionLevel":3},
+	 {"id":"none"}]}`)
+
+	models, errModels := FetchModels(context.Background(), baseURL, "tok-abc", RegionGlobal)
+	if errModels != nil {
+		t.Fatalf("fetch: %v", errModels)
+	}
+	want := map[string]string{"zai_auto": "中", "zai_auto-fast": "低", "numeric": "3", "none": ""}
+	for _, model := range models {
+		if model.Credits != want[model.ID] {
+			t.Fatalf("%s: Credits = %q, want %q", model.ID, model.Credits, want[model.ID])
+		}
+	}
+
+	// 国内静态表没有上游档位，必须留空而不是把「没给」写成 0/免费。
+	for _, model := range staticCNModels() {
+		if model.Credits != "" {
+			t.Fatalf("静态模型 %s 不应带倍率: %q", model.ID, model.Credits)
+		}
+	}
+}
+
+// TestLevelTextToleratesShapes 守住未知形态：宁可留空，也不把结构塞进倍率列。
+func TestLevelTextToleratesShapes(t *testing.T) {
+	cases := map[string]string{
+		`"高"`:           "高",
+		`3`:             "3",
+		`null`:          "",
+		``:              "",
+		`{"level":"低"}`: "",
+	}
+	for raw, want := range cases {
+		if got := levelText(json.RawMessage(raw)); got != want {
+			t.Fatalf("levelText(%s) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+// TestAdapterModelCredits 锁定倍率表与清单同源。
+func TestAdapterModelCredits(t *testing.T) {
+	v := &adapter{}
+	v.modelsToPluginAPI([]Model{
+		{ID: "zai_auto", Credits: "中"},
+		{ID: "plain"},
+	})
+	credits := v.ModelCredits()
+	if got := credits["zai_auto"]; got != "中" {
+		t.Fatalf("倍率 = %q, want 中", got)
+	}
+	if _, exists := credits["plain"]; exists {
+		t.Fatal("没有档位的模型不应进表")
 	}
 }
