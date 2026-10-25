@@ -5,6 +5,7 @@ package codearts
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
 	"freetier2api-plugin/internal/core"
@@ -14,6 +15,10 @@ import (
 // adapter 是 core.Vendor 在 CodeArts 上的实现。
 type adapter struct {
 	*core.NativeAdapter[*Credential]
+
+	// credits 缓存最近一轮目录探测的倍率表（官方模型 ID → 展示文案）。
+	creditsMu sync.RWMutex
+	credits   map[string]string
 }
 
 // Instances 构造 CodeArts 实例（单一部署，国内区）。
@@ -75,7 +80,7 @@ func (v *adapter) StaticModels(ctx context.Context) ([]pluginapi.ModelInfo, erro
 	if errModels != nil {
 		return nil, errModels
 	}
-	return modelsToPluginAPI(models), nil
+	return v.modelsToPluginAPI(models), nil
 }
 
 // ModelsForAuth 返回该凭证可用的模型。
@@ -85,11 +90,24 @@ func (v *adapter) ModelsForAuth(ctx context.Context, cred *core.Credential) ([]p
 	if errModels != nil {
 		return nil, errModels
 	}
-	return modelsToPluginAPI(models), nil
+	return v.modelsToPluginAPI(models), nil
 }
 
-// modelsToPluginAPI 把上游模型条目转成宿主契约类型。
-func modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
+// modelsToPluginAPI 把上游模型条目转成宿主契约类型，顺带记下倍率表。
+//
+// 倍率与清单必须出自同一轮探测：分开取会出现「模型换了一批、倍率还是上一批」
+// 的错配。CodeArts 的倍率来自内置目录 credit[].ratio_display，福利通道没有
+// 倍率字段，因此福利模型不进表（控制台显示「—」，不臆造成免费）。
+func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
+	credits := make(map[string]string, len(models))
+	for _, model := range models {
+		if label := core.FormatRate(model.Credits); label != "" {
+			credits[model.ID] = label
+		}
+	}
+	v.creditsMu.Lock()
+	v.credits = credits
+	v.creditsMu.Unlock()
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		if strings.TrimSpace(model.ID) == "" {
 			return core.ModelDescriptor{}, false
@@ -101,9 +119,24 @@ func modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 			ContextLength:      int64(model.ContextWindow),
 			MaxOutputTokens:    int64(model.MaxTokens),
 			SupportsTools:      model.SupportsTools,
+			SupportsImages:     model.SupportsImages,
 			CanDisableThinking: !model.IsReasoning,
 		}, true
 	})
+}
+
+// ModelCredits 实现 core.CreditsProvider：返回「官方模型 ID → 计费倍率」。
+func (v *adapter) ModelCredits() map[string]string {
+	v.creditsMu.RLock()
+	defer v.creditsMu.RUnlock()
+	if len(v.credits) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(v.credits))
+	for id, value := range v.credits {
+		out[id] = value
+	}
+	return out
 }
 
 // ---- 执行 ----
@@ -210,3 +243,6 @@ var (
 	_ core.ModelsProvider    = (*adapter)(nil)
 	_ core.QuotaProvider     = (*adapter)(nil)
 )
+
+// 编译期断言：CodeArts 提供倍率能力。
+var _ core.CreditsProvider = (*adapter)(nil)
