@@ -215,8 +215,8 @@ func TestParseBuiltinModelsReadsBuiltinEnvelope(t *testing.T) {
 	if glm.ContextWindow != 202752 {
 		t.Fatalf("ContextWindow = %d, want 202752", glm.ContextWindow)
 	}
-	if glm.MaxTokens != DefaultMaxOutputTokens {
-		t.Fatalf("MaxTokens = %d, want %d", glm.MaxTokens, DefaultMaxOutputTokens)
+	if glm.MaxTokens != maxOutputTokenCap {
+		t.Fatalf("MaxTokens = %d, want %d", glm.MaxTokens, maxOutputTokenCap)
 	}
 	if !glm.SupportsTools {
 		t.Fatal("CodeArts 模型都支持工具调用")
@@ -276,11 +276,11 @@ func TestBaseCreditDisplayPicksBaseTier(t *testing.T) {
 // （InferHub.001001005.400）。目录自述 131072/393216，直接照抄会让客户端
 // 用超出上限的 max_tokens 把请求打到整条失败。
 func TestCapOutputTokensClampsToUpstreamHardLimit(t *testing.T) {
-	if got := capOutputTokens(65537); got != DefaultMaxOutputTokens {
-		t.Fatalf("65537 应夹到 %d，实际 %d", DefaultMaxOutputTokens, got)
+	if got := capOutputTokens(65537); got != maxOutputTokenCap {
+		t.Fatalf("65537 应夹到 %d，实际 %d", maxOutputTokenCap, got)
 	}
-	if got := capOutputTokens(393216); got != DefaultMaxOutputTokens {
-		t.Fatalf("393216 应夹到 %d，实际 %d", DefaultMaxOutputTokens, got)
+	if got := capOutputTokens(393216); got != maxOutputTokenCap {
+		t.Fatalf("393216 应夹到 %d，实际 %d", maxOutputTokenCap, got)
 	}
 	if got := capOutputTokens(8192); got != 8192 {
 		t.Fatalf("未超限应原样保留，实际 %d", got)
@@ -313,5 +313,33 @@ func TestAdapterModelCredits(t *testing.T) {
 	}
 	if _, exists := credits["kimi-k2.6-vl"]; exists {
 		t.Fatal("没有倍率的模型不应进表")
+	}
+}
+
+// TestBundledCatalogCarriesNoPricing 锁定兜底清单只存上限与能力。
+//
+// 描述与倍率以上游目录为唯一来源：兜底里再抄一份，上游调价/改名时没有任何
+// 测试能发现它已经过期。回归时会在控制台显示早已作废的倍率。
+func TestBundledCatalogCarriesNoPricing(t *testing.T) {
+	for _, model := range bundledModels() {
+		if model.Credits != "" {
+			t.Fatalf("%s 的兜底清单不应带倍率: %q", model.ID, model.Credits)
+		}
+		if model.Description != "" {
+			t.Fatalf("%s 的兜底清单不应带描述: %q", model.ID, model.Description)
+		}
+	}
+}
+
+// TestFallbackLimitIndexCoversBundledIDs 验证上限索引与兜底清单同源。
+func TestFallbackLimitIndexCoversBundledIDs(t *testing.T) {
+	for _, model := range bundledModels() {
+		hint, ok := fallbackLimitIndex[strings.ToLower(model.ID)]
+		if !ok {
+			t.Fatalf("%s 不在兜底上限索引里", model.ID)
+		}
+		if hint[0] != model.ContextWindow || hint[1] != model.MaxTokens {
+			t.Fatalf("%s 上限索引 = %v, want [%d %d]", model.ID, hint, model.ContextWindow, model.MaxTokens)
+		}
 	}
 }

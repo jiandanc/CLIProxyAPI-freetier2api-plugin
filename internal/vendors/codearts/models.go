@@ -1,7 +1,7 @@
 package codearts
 
 // 模型目录：提供 CodeArts 的内置与福利模型列表。
-// 参考：/Users/jiandan/Workspaces/codearts2api/internal/upstream/models.go
+// 接口形态以 /v1/model/builtin 的响应为准（见 builtinCatalog 的注释）。
 
 import (
 	"context"
@@ -26,7 +26,6 @@ type Model struct {
 	SupportsTools bool   `json:"supports_tools"`
 	// SupportsImages 来自内置目录的 supports_images（视觉模型才有这个位）。
 	SupportsImages bool `json:"supports_images,omitempty"`
-	IsReasoning    bool `json:"is_reasoning"`
 	// Credits 是上游 credit[].ratio_display 的基础档文案（形如 "0.7x"）。
 	// 空串表示上游没给——不能当成 0（0 在控制台的含义是「免费」）。
 	Credits string `json:"credits,omitempty"`
@@ -95,12 +94,12 @@ func FetchBenefitModels(ctx context.Context, cred *Credential) ([]Model, error) 
 		}
 		contextWindow, maxTokens := item.ContextWindow, item.MaxTokens
 		if contextWindow <= 0 || maxTokens <= 0 {
-			hintContext, hintOutput := fallbackLimits(id)
+			hint := fallbackLimitIndex[strings.ToLower(id)]
 			if contextWindow <= 0 {
-				contextWindow = hintContext
+				contextWindow = hint[0]
 			}
 			if maxTokens <= 0 {
-				maxTokens = hintOutput
+				maxTokens = hint[1]
 			}
 		}
 		models = append(models, Model{
@@ -116,20 +115,20 @@ func FetchBenefitModels(ctx context.Context, cred *Credential) ([]Model, error) 
 	return models, nil
 }
 
-// DefaultMaxOutputTokens 是 CodeArts 上游单次输出额度的硬顶。
+// maxOutputTokenCap 是 CodeArts 上游单次输出额度的硬顶。
 //
 // 实测：max_tokens 的**取值**参与上游预校验——65536 放行，65537 起整条请求
 // 回 InferHub.001001005.400（与模型、提示词长度无关，是平台级校验）。目录里
 // GLM-5.2 写 131072、deepseek-v4 写 393216，照抄进 /v1/models 客户端就会
-// 整条请求被拒，所以对外报出的输出上限先夹一遍。
-const DefaultMaxOutputTokens = 65536
+// 整条请求被拒，所以目录与请求体两处都要夹。
+const maxOutputTokenCap = 65536
 
 // capOutputTokens 把目录自述的输出上限夹到上游硬顶；0 表示目录没给，原样保留。
 func capOutputTokens(declared int) int {
-	if declared <= 0 || declared <= DefaultMaxOutputTokens {
-		return declared
+	if declared > maxOutputTokenCap {
+		return maxOutputTokenCap
 	}
-	return DefaultMaxOutputTokens
+	return declared
 }
 
 // creditTier 是上游 credit[] 的一个计费档（按输入长度分段）。
@@ -187,35 +186,35 @@ type builtinCatalog struct {
 	Models        []builtinEntry `json:"models"`
 }
 
-// bundledModels 返回 CodeArts 的兜底模型清单。
+// bundledCatalog 是无凭证/目录失败时的兜底清单。
 //
-// 无凭证或目录接口失败时的退路：照 2026-09-27 的内置目录实测快照写，
-// 条目、倍率、图片能力与上游一致；上下文与输出上限来自 agent detail 的
+// 只保留「ID → 上下文/输出上限 + 能力」：描述与倍率一律以线上目录为准，
+// 兜底里再存一份只会在上游调价/改名时静默过期。上限来自 agent detail 的
 // model_parameters（内置目录本身不给这两个数）。
-func bundledModels() []Model {
-	return []Model{
-		{ID: "GLM-5.2", Name: "GLM-5.2", Description: "Latest Flagship: Long-horizon tasks & complex projects", ContextWindow: 202752, MaxTokens: DefaultMaxOutputTokens, SupportsTools: true, Credits: "0.7x"},
-		{ID: "openpangu-2.0-pro", Name: "OpenPangu-2.0-Pro", Description: "Latest Flagship: Long-horizon tasks & complex projects", ContextWindow: 524288, MaxTokens: DefaultMaxOutputTokens, SupportsTools: true, Credits: "0.7x"},
-		{ID: "openpangu-2.0-flash", Name: "OpenPangu-2.0-Flash", Description: "Balanced: Reasoning & Speed", ContextWindow: 524288, MaxTokens: DefaultMaxOutputTokens, SupportsTools: true, Credits: "0.32x"},
-		{ID: "glm-5.2-sft-harmony", Name: "GLM-5.2-ArkTS-SPARK", Description: "Latest Flagship: Long-horizon tasks & complex projects", ContextWindow: 202752, MaxTokens: DefaultMaxOutputTokens, SupportsTools: true, Credits: "0.7x"},
-		{ID: "Qwen3-VL-235B", Name: "Qwen3-VL-235B", Description: "A multimodal vision-language model capable of image comprehension", SupportsTools: true, SupportsImages: true},
-		{ID: "kimi-k2.6-vl", Name: "Kimi-K2.6-VL", Description: "Outstanding programming performance", SupportsTools: true, SupportsImages: true},
-	}
+var bundledCatalog = []Model{
+	{ID: "GLM-5.2", Name: "GLM-5.2", ContextWindow: 202752, MaxTokens: maxOutputTokenCap, SupportsTools: true},
+	{ID: "openpangu-2.0-pro", Name: "OpenPangu-2.0-Pro", ContextWindow: 524288, MaxTokens: maxOutputTokenCap, SupportsTools: true},
+	{ID: "openpangu-2.0-flash", Name: "OpenPangu-2.0-Flash", ContextWindow: 524288, MaxTokens: maxOutputTokenCap, SupportsTools: true},
+	{ID: "glm-5.2-sft-harmony", Name: "GLM-5.2-ArkTS-SPARK", ContextWindow: 202752, MaxTokens: maxOutputTokenCap, SupportsTools: true},
+	{ID: "Qwen3-VL-235B", Name: "Qwen3-VL-235B", SupportsTools: true, SupportsImages: true},
+	{ID: "kimi-k2.6-VL", Name: "Kimi-K2.6-VL", SupportsTools: true, SupportsImages: true},
 }
 
-// fallbackLimits 返回兜底清单里同 ID 模型的上下文与输出上限。
-//
-// 内置目录不给这两个数，真实值在 /v1/agent-center/agents/detail 的
-// model_parameters 里；本插件不做 agent 探测，因此只对兜底清单里实测过的
-// 条目补位，其余保持 0（未知），不编造数字。
-func fallbackLimits(id string) (int, int) {
-	for _, model := range bundledModels() {
-		if strings.EqualFold(model.ID, id) {
-			return model.ContextWindow, model.MaxTokens
-		}
-	}
-	return 0, 0
+// bundledModels 返回兜底清单的副本，调用方可以安全地增删。
+func bundledModels() []Model {
+	return append([]Model(nil), bundledCatalog...)
 }
+
+// fallbackLimitIndex 是兜底清单的「小写 ID → {上下文, 输出上限}」索引。
+//
+// 解析时按需查表，避免每个目录项都重建一遍兜底清单。
+var fallbackLimitIndex = func() map[string][2]int {
+	index := make(map[string][2]int, len(bundledCatalog))
+	for _, model := range bundledCatalog {
+		index[strings.ToLower(model.ID)] = [2]int{model.ContextWindow, model.MaxTokens}
+	}
+	return index
+}()
 
 // parseBuiltinModels 解析内置目录响应。
 func parseBuiltinModels(body []byte) ([]Model, error) {
@@ -239,12 +238,12 @@ func parseBuiltinModels(body []byte) ([]Model, error) {
 		}
 		contextWindow, maxTokens := entry.ContextWindow, entry.MaxTokens
 		if contextWindow <= 0 || maxTokens <= 0 {
-			hintContext, hintOutput := fallbackLimits(id)
+			hint := fallbackLimitIndex[strings.ToLower(id)]
 			if contextWindow <= 0 {
-				contextWindow = hintContext
+				contextWindow = hint[0]
 			}
 			if maxTokens <= 0 {
-				maxTokens = hintOutput
+				maxTokens = hint[1]
 			}
 		}
 		models = append(models, Model{

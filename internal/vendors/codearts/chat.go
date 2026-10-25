@@ -6,11 +6,13 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -258,3 +260,39 @@ const (
 	EpLoginTicket  = "/v1/login/ticket"
 	EpOAuthTokens  = "/v1/oauth2/tokens"
 )
+
+// clampMaxTokens 把请求体里的 max_tokens / max_completion_tokens 夹到上游硬顶。
+//
+// 目录报出的上限可以夹，但客户端（如 auto-compact 续传）会自己带更大的值，
+// 上游对 max_tokens 的取值范围做平台级预校验，超限整条请求回
+// InferHub.001001005.400。这里只做最小改写：能解析成 JSON 且确实超限才回写，
+// 其余情况原样放行，不碰请求体的其它字段。
+func clampMaxTokens(body []byte) []byte {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body
+	}
+	changed := false
+	for _, key := range []string{"max_tokens", "max_completion_tokens"} {
+		raw, ok := payload[key]
+		if !ok {
+			continue
+		}
+		var value int
+		if err := json.Unmarshal(raw, &value); err != nil {
+			continue
+		}
+		if value > maxOutputTokenCap {
+			payload[key] = json.RawMessage(strconv.Itoa(maxOutputTokenCap))
+			changed = true
+		}
+	}
+	if !changed {
+		return body
+	}
+	clamped, err := json.Marshal(payload)
+	if err != nil {
+		return body
+	}
+	return clamped
+}

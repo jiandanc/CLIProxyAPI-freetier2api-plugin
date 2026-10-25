@@ -113,14 +113,13 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 			return core.ModelDescriptor{}, false
 		}
 		return core.ModelDescriptor{
-			ID:                 model.ID,
-			Name:               model.Name,
-			Description:        model.Description,
-			ContextLength:      int64(model.ContextWindow),
-			MaxOutputTokens:    int64(model.MaxTokens),
-			SupportsTools:      model.SupportsTools,
-			SupportsImages:     model.SupportsImages,
-			CanDisableThinking: !model.IsReasoning,
+			ID:              model.ID,
+			Name:            model.Name,
+			Description:     model.Description,
+			ContextLength:   int64(model.ContextWindow),
+			MaxOutputTokens: int64(model.MaxTokens),
+			SupportsTools:   model.SupportsTools,
+			SupportsImages:  model.SupportsImages,
 		}, true
 	})
 }
@@ -149,7 +148,7 @@ func (v *adapter) Execute(ctx context.Context, cred *core.Credential, req *core.
 	}
 	payload, errChat := Chat(ctx, "", ChatRequest{
 		Credential: native,
-		Body:       req.Payload,
+		Body:       clampMaxTokens(req.Payload),
 		Stream:     false,
 		Benefit:    true,
 	})
@@ -170,7 +169,7 @@ func (v *adapter) ExecuteStream(ctx context.Context, cred *core.Credential, req 
 	}
 	resp, errStream := ChatStream(ctx, "", ChatRequest{
 		Credential: native,
-		Body:       req.Payload,
+		Body:       clampMaxTokens(req.Payload),
 		Stream:     true,
 		Benefit:    true,
 	})
@@ -242,7 +241,5 @@ var (
 	_ core.LoginProvider     = (*adapter)(nil)
 	_ core.ModelsProvider    = (*adapter)(nil)
 	_ core.QuotaProvider     = (*adapter)(nil)
+	_ core.CreditsProvider   = (*adapter)(nil)
 )
-
-// 编译期断言：CodeArts 提供倍率能力。
-var _ core.CreditsProvider = (*adapter)(nil)
