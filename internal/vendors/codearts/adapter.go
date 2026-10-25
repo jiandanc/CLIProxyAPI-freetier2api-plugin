@@ -4,6 +4,7 @@ package codearts
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 
@@ -19,6 +20,11 @@ type adapter struct {
 	// credits 缓存最近一轮目录探测的倍率表（官方模型 ID → 展示文案）。
 	creditsMu sync.RWMutex
 	credits   map[string]string
+
+	// modelsByLower 是小写模型名 → 注册 ID 的索引，用于把请求里的旧写法
+	// 归一成目录里的正式 ID。
+	modelsMu      sync.RWMutex
+	modelsByLower map[string]string
 }
 
 // Instances 构造 CodeArts 实例（单一部署，国内区）。
@@ -108,6 +114,15 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 	v.creditsMu.Lock()
 	v.credits = credits
 	v.creditsMu.Unlock()
+	ids := make(map[string]string, len(models))
+	for _, model := range models {
+		if id := strings.TrimSpace(model.ID); id != "" {
+			ids[strings.ToLower(id)] = id
+		}
+	}
+	v.modelsMu.Lock()
+	v.modelsByLower = ids
+	v.modelsMu.Unlock()
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		if strings.TrimSpace(model.ID) == "" {
 			return core.ModelDescriptor{}, false
@@ -122,6 +137,50 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 			SupportsImages:  model.SupportsImages,
 		}, true
 	})
+}
+
+// canonicalizeRequestModel 把请求体里的模型名规范成注册时的 ID。
+//
+// 宿主按 ID 精确匹配，客户端却可能沿用旧文档/旧别名的写法（例如小写
+// glm-5.2 对应注册的 GLM-5.2）。上游对模型名大小写敏感，原样出站会被拒；
+// 这里只做大小写归一，未注册的名字保持原样，交给上游判定。
+func (v *adapter) canonicalizeRequestModel(body []byte) []byte {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return body
+	}
+	raw, ok := payload["model"]
+	if !ok {
+		return body
+	}
+	var name string
+	if err := json.Unmarshal(raw, &name); err != nil {
+		return body
+	}
+	canonical := v.canonicalModelName(name)
+	if canonical == name {
+		return body
+	}
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return body
+	}
+	payload["model"] = encoded
+	rewritten, err := json.Marshal(payload)
+	if err != nil {
+		return body
+	}
+	return rewritten
+}
+
+// canonicalModelName 用最新一轮目录把名字映射回注册 ID；未注册返回原名。
+func (v *adapter) canonicalModelName(name string) string {
+	v.modelsMu.RLock()
+	defer v.modelsMu.RUnlock()
+	if canonical, ok := v.modelsByLower[strings.ToLower(strings.TrimSpace(name))]; ok {
+		return canonical
+	}
+	return name
 }
 
 // ModelCredits 实现 core.CreditsProvider：返回「官方模型 ID → 计费倍率」。
@@ -148,7 +207,7 @@ func (v *adapter) Execute(ctx context.Context, cred *core.Credential, req *core.
 	}
 	payload, errChat := Chat(ctx, "", ChatRequest{
 		Credential: native,
-		Body:       clampMaxTokens(req.Payload),
+		Body:       v.canonicalizeRequestModel(clampMaxTokens(req.Payload)),
 		Stream:     false,
 		Benefit:    true,
 	})
@@ -169,7 +228,7 @@ func (v *adapter) ExecuteStream(ctx context.Context, cred *core.Credential, req 
 	}
 	resp, errStream := ChatStream(ctx, "", ChatRequest{
 		Credential: native,
-		Body:       clampMaxTokens(req.Payload),
+		Body:       v.canonicalizeRequestModel(clampMaxTokens(req.Payload)),
 		Stream:     true,
 		Benefit:    true,
 	})

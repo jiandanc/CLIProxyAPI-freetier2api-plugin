@@ -92,16 +92,7 @@ func FetchBenefitModels(ctx context.Context, cred *Credential) ([]Model, error) 
 		if id == "" {
 			continue
 		}
-		contextWindow, maxTokens := item.ContextWindow, item.MaxTokens
-		if contextWindow <= 0 || maxTokens <= 0 {
-			hint := fallbackLimitIndex[strings.ToLower(id)]
-			if contextWindow <= 0 {
-				contextWindow = hint[0]
-			}
-			if maxTokens <= 0 {
-				maxTokens = hint[1]
-			}
-		}
+		contextWindow, maxTokens := applyLimitHints(id, item.ContextWindow, item.MaxTokens)
 		models = append(models, Model{
 			ID:            id,
 			Name:          core.FirstNonEmpty(item.ModelName, id),
@@ -171,8 +162,6 @@ type builtinEntry struct {
 	ModelDesc      string       `json:"model_desc"`
 	Enable         *bool        `json:"enable"`
 	SupportsImages bool         `json:"supports_images"`
-	ContextWindow  int          `json:"context_window"`
-	MaxTokens      int          `json:"max_tokens"`
 	Credit         []creditTier `json:"credit"`
 }
 
@@ -216,6 +205,24 @@ var fallbackLimitIndex = func() map[string][2]int {
 	return index
 }()
 
+// applyLimitHints 用兜底清单补齐缺失的上下文/输出上限。
+//
+// 内置目录不带这两类数字（真实值在 agent detail 里），福利通道也可能缺；
+// 只在缺失侧补位，上游真的给了就以上游为准。
+func applyLimitHints(id string, contextWindow, maxTokens int) (int, int) {
+	if contextWindow > 0 && maxTokens > 0 {
+		return contextWindow, maxTokens
+	}
+	hint := fallbackLimitIndex[strings.ToLower(id)]
+	if contextWindow <= 0 {
+		contextWindow = hint[0]
+	}
+	if maxTokens <= 0 {
+		maxTokens = hint[1]
+	}
+	return contextWindow, maxTokens
+}
+
 // parseBuiltinModels 解析内置目录响应。
 func parseBuiltinModels(body []byte) ([]Model, error) {
 	var catalog builtinCatalog
@@ -236,20 +243,12 @@ func parseBuiltinModels(body []byte) ([]Model, error) {
 		if id == "" {
 			continue
 		}
-		contextWindow, maxTokens := entry.ContextWindow, entry.MaxTokens
-		if contextWindow <= 0 || maxTokens <= 0 {
-			hint := fallbackLimitIndex[strings.ToLower(id)]
-			if contextWindow <= 0 {
-				contextWindow = hint[0]
-			}
-			if maxTokens <= 0 {
-				maxTokens = hint[1]
-			}
-		}
+		contextWindow, maxTokens := applyLimitHints(id, 0, 0)
 		models = append(models, Model{
-			ID:             id,
-			Name:           core.FirstNonEmpty(entry.ModelName, id),
-			Description:    core.FirstNonEmpty(entry.ModelDesc, "CodeArts 内置模型"),
+			ID:   id,
+			Name: core.FirstNonEmpty(entry.ModelName, id),
+			// 描述只认上游 model_desc：兜底清单也不编造文案，两条路径保持一致。
+			Description:    entry.ModelDesc,
 			ContextWindow:  contextWindow,
 			MaxTokens:      capOutputTokens(maxTokens),
 			SupportsTools:  true,
@@ -276,13 +275,16 @@ func FetchModels(ctx context.Context, cred *Credential) ([]Model, error) {
 		logger.Debug("codearts: 拉取福利模型清单失败: %v", errBenefit)
 		benefitModels = nil
 	}
-	fallback := func() ([]Model, error) {
-		return mergeBenefitModels(bundledModels(), benefitModels), nil
-	}
 
+	body, errFetch := fetchBuiltinCatalog(ctx, cred)
+	return modelsFromCatalog(body, errFetch, benefitModels), nil
+}
+
+// fetchBuiltinCatalog 拉内置目录的原始响应体。
+func fetchBuiltinCatalog(ctx context.Context, cred *Credential) ([]byte, error) {
 	req, errReq := http.NewRequestWithContext(ctx, http.MethodGet, SnapEngineApiHost+EpModelBuiltin, nil)
 	if errReq != nil {
-		return fallback()
+		return nil, errReq
 	}
 	req.Header.Set("Agent-Type", "PromptCenter")
 	signHuaweiRequest(req, nil, cred)
@@ -290,15 +292,23 @@ func FetchModels(ctx context.Context, cred *Credential) ([]Model, error) {
 	client := hostbridge.Client(ctx, 15*time.Second)
 	resp, errDo := client.Do(req)
 	if errDo != nil {
-		return fallback()
+		return nil, errDo
 	}
 	defer func() { _ = resp.Body.Close() }()
-
 	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("builtin catalog status %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+}
+
+// modelsFromCatalog 把目录响应落成模型清单：网络失败、非 200、解析失败、
+// 空清单都回落兜底清单，但仍并入福利通道模型。
+func modelsFromCatalog(body []byte, errFetch error, benefit []Model) []Model {
+	fallback := func() []Model { return mergeBenefitModels(bundledModels(), benefit) }
+	if errFetch != nil {
+		logger.Debug("codearts: 拉取内置模型目录失败: %v", errFetch)
 		return fallback()
 	}
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	models, errParse := parseBuiltinModels(body)
 	if errParse != nil {
 		logger.Debug("codearts: 解析内置模型目录失败: %v", errParse)
@@ -307,7 +317,7 @@ func FetchModels(ctx context.Context, cred *Credential) ([]Model, error) {
 	if len(models) == 0 {
 		return fallback()
 	}
-	return mergeBenefitModels(models, benefitModels), nil
+	return mergeBenefitModels(models, benefit)
 }
 
 // mergeBenefitModels 把福利通道模型并进清单，已存在的 ID 不重复添加。

@@ -18,6 +18,9 @@ func TestClampMaxTokens(t *testing.T) {
 	}{
 		{name: "超限回夹", in: `{"model":"glm-5.2","max_tokens":131072}`, want: maxOutputTokenCap},
 		{name: "completion 键同样夹", in: `{"max_completion_tokens":393216}`, want: maxOutputTokenCap},
+		{name: "浮点形态也夹", in: `{"max_tokens":131072.0}`, want: maxOutputTokenCap},
+		{name: "数字字符串也夹", in: `{"max_tokens":"131072"}`, want: maxOutputTokenCap},
+		{name: "两键同时超限", in: `{"max_tokens":200000,"max_completion_tokens":300000}`, want: maxOutputTokenCap},
 		{name: "恰好在顶保留", in: `{"max_tokens":65536}`, want: 65536},
 		{name: "未超限原样", in: `{"max_tokens":4096}`, want: 4096},
 	}
@@ -43,7 +46,11 @@ func TestClampMaxTokensPassesThroughUntouched(t *testing.T) {
 	for _, body := range []string{
 		`not json at all`,
 		`{"model":"glm-5.2"}`,
-		`{"max_tokens":"131072"}`, // 非数字：不猜语义
+		`{"max_tokens":true}`,
+		`{"max_tokens":{}}`,
+		`{"max_tokens":null}`,
+		`[]`,
+		`null`,
 		`{"max_tokens":4096}`,
 	} {
 		if got := string(clampMaxTokens([]byte(body))); got != body {

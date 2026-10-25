@@ -3,6 +3,7 @@ package codearts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -341,5 +342,74 @@ func TestFallbackLimitIndexCoversBundledIDs(t *testing.T) {
 		if hint[0] != model.ContextWindow || hint[1] != model.MaxTokens {
 			t.Fatalf("%s 上限索引 = %v, want [%d %d]", model.ID, hint, model.ContextWindow, model.MaxTokens)
 		}
+	}
+}
+
+// TestCanonicalizeRequestModelResolvesCase 锁定旧写法（小写）到注册 ID 的归一。
+//
+// 宿主按 ID 精确匹配，而老文档里写的是 glm-5.2；上游对大小写敏感，原样出站
+// 会被拒。归一只发生在命中注册项时，未注册的名字原样放行。
+func TestCanonicalizeRequestModelResolvesCase(t *testing.T) {
+	v := &adapter{}
+	v.modelsToPluginAPI([]Model{{ID: "GLM-5.2"}, {ID: "Qwen3-VL-235B"}})
+
+	cases := []struct {
+		in       string
+		wantName string
+	}{
+		{`{"model":"glm-5.2","max_tokens":1024}`, "GLM-5.2"},
+		{`{"model":"qwen3-vl-235b"}`, "Qwen3-VL-235B"},
+		{`{"model":"glm-5.3"}`, "glm-5.3"},
+	}
+	for _, tc := range cases {
+		out := v.canonicalizeRequestModel([]byte(tc.in))
+		var payload map[string]any
+		if err := json.Unmarshal(out, &payload); err != nil {
+			t.Fatalf("%s: 输出不是合法 JSON: %v", tc.in, err)
+		}
+		if payload["model"] != tc.wantName {
+			t.Fatalf("%s: model = %v, want %s", tc.in, payload["model"], tc.wantName)
+		}
+	}
+
+	for _, body := range []string{`not json`, `{"max_tokens":1}`, `{"model":42}`, `null`} {
+		if got := string(v.canonicalizeRequestModel([]byte(body))); got != body {
+			t.Fatalf("不该改写却改写了: %q", got)
+		}
+	}
+}
+
+// TestModelsFromCatalogFallsBack 覆盖目录链路的降级：网络失败、非 200（由
+// fetchBuiltinCatalog 折成 error）、坏 JSON、空清单都回落兜底清单，且福利
+// 通道模型仍然并入。
+func TestModelsFromCatalogFallsBack(t *testing.T) {
+	benefit := []Model{{ID: "snap-chat", Name: "snap-chat", Benefit: true}}
+	fallbacks := []struct {
+		name string
+		body []byte
+		err  error
+	}{
+		{name: "网络失败", err: errors.New("boom")},
+		{name: "坏 JSON", body: []byte(`{"builtinModels":`)},
+		{name: "空清单", body: []byte(`{"count":0,"builtinModels":[]}`)},
+		{name: "空响应体", body: nil},
+	}
+	for _, tc := range fallbacks {
+		models := modelsFromCatalog(tc.body, tc.err, benefit)
+		if len(models) != len(bundledCatalog)+1 {
+			t.Fatalf("%s: models = %d, want %d", tc.name, len(models), len(bundledCatalog)+1)
+		}
+		if models[len(models)-1].ID != "snap-chat" {
+			t.Fatalf("%s: 福利模型未并入: %+v", tc.name, models)
+		}
+	}
+
+	body := []byte(`{"count":1,"builtinModels":[{"model_id":"GLM-5.2","model_name":"GLM-5.2"}]}`)
+	models := modelsFromCatalog(body, nil, benefit)
+	if len(models) != 2 || models[0].ID != "GLM-5.2" || models[1].ID != "snap-chat" {
+		t.Fatalf("models = %+v", models)
+	}
+	if models[0].ContextWindow != 202752 {
+		t.Fatalf("上下文兜底 = %d, want 202752", models[0].ContextWindow)
 	}
 }
