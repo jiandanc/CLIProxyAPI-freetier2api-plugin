@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
@@ -195,6 +196,70 @@ func TestMergeSameNameModels(t *testing.T) {
 	}
 	if len(merged[0].SupportedInputModalities) != 2 {
 		t.Fatalf("modalities = %#v", merged[0].SupportedInputModalities)
+	}
+}
+
+// TestMergeSameNameModelsUnionsToolParameters 锁定能力取或的两个方向。
+//
+// 回归：之前只并 SupportedGenerationMethods 不并 SupportedParameters，
+// 合并 [无工具条目, 支持工具条目] 会得到「methods 有 tool_calls、params 没有
+// tools」的矛盾组合，客户端据此隐藏工具开关，实际支持的模型反而丢能力。
+func TestMergeSameNameModelsUnionsToolParameters(t *testing.T) {
+	toolModel := pluginapi.ModelInfo{
+		ID:                         "glm-5.2",
+		SupportedGenerationMethods: []string{"tool_calls"},
+		SupportedParameters:        []string{"temperature", "tools", "tool_choice"},
+	}
+	plainModel := pluginapi.ModelInfo{
+		ID:                  "GLM-5.2",
+		SupportedParameters: []string{"temperature", "top_p"},
+	}
+
+	for name, models := range map[string][]pluginapi.ModelInfo{
+		"先无工具有工具":  {plainModel, toolModel},
+		"先有工具后无工具": {toolModel, plainModel},
+	} {
+		merged := MergeSameNameModels(models)
+		if len(merged) != 1 {
+			t.Fatalf("%s: merged len = %d", name, len(merged))
+		}
+		if !slices.Contains(merged[0].SupportedGenerationMethods, "tool_calls") {
+			t.Fatalf("%s: methods = %#v", name, merged[0].SupportedGenerationMethods)
+		}
+		for _, param := range core.ToolParameters {
+			if !slices.Contains(merged[0].SupportedParameters, param) {
+				t.Fatalf("%s: params = %#v，缺 %q", name, merged[0].SupportedParameters, param)
+			}
+		}
+	}
+}
+
+// TestLoadCachedStateRestoresCapabilities 锁定重启回灌不丢能力。
+//
+// state.json 只存 SupportsImages / SupportsTool，回灌时必须走注册转换
+// 重新派生 modalities / methods / parameters，否则重启后到下一轮探测成功前，
+// 控制台会把视觉模型和工具模型显示成「不支持」。
+func TestLoadCachedStateRestoresCapabilities(t *testing.T) {
+	manager := newTestCatalog(t)
+	manager.LoadCachedState([]core.CachedModel{
+		{VendorID: "codearts", ID: "Qwen3-VL-235B", ContextLength: 131072, MaxOutputTokens: 8192, SupportsImages: true, SupportsTool: true},
+	})
+
+	models := manager.Registered("codearts")
+	if len(models) != 1 {
+		t.Fatalf("cached models = %d", len(models))
+	}
+	info := models[0]
+	if !slices.Contains(info.SupportedInputModalities, "image") {
+		t.Fatalf("modalities = %#v，缺 image", info.SupportedInputModalities)
+	}
+	if !slices.Contains(info.SupportedGenerationMethods, "tool_calls") {
+		t.Fatalf("methods = %#v，缺 tool_calls", info.SupportedGenerationMethods)
+	}
+	for _, param := range core.ToolParameters {
+		if !slices.Contains(info.SupportedParameters, param) {
+			t.Fatalf("params = %#v，缺 %q", info.SupportedParameters, param)
+		}
 	}
 }
 

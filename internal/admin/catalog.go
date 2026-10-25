@@ -556,12 +556,20 @@ func (c *Catalog) LoadCachedState(cached []core.CachedModel) {
 		}
 		vendorID := cachedVendorID(item)
 		entry := entries[vendorID]
-		entry.models = append(entry.models, pluginapi.ModelInfo{
-			ID: item.ID, Name: item.Name, DisplayName: item.Name,
-			Description: item.Description, ContextLength: item.ContextLength,
-			InputTokenLimit: item.ContextLength, MaxCompletionTokens: item.MaxOutputTokens,
-			OutputTokenLimit: item.MaxOutputTokens, Thinking: thinkingFromCached(item),
+		// 复用注册转换，能力字段（图片、工具、参数）与实时探测保持同一来源；
+		// 手工拼 ModelInfo 会漏掉 SupportedInputModalities / SupportedParameters，
+		// 重启后到下一轮探测成功前，控制台会显示成「不支持」。
+		model := core.ModelInfoToPluginAPI(vendorID, core.ModelDescriptor{
+			ID:              item.ID,
+			Name:            item.Name,
+			Description:     item.Description,
+			ContextLength:   item.ContextLength,
+			MaxOutputTokens: item.MaxOutputTokens,
+			SupportsImages:  item.SupportsImages,
+			SupportsTools:   item.SupportsTool,
 		})
+		model.Thinking = thinkingFromCached(item)
+		entry.models = append(entry.models, model)
 		if rate := core.FormatRate(item.Credits); rate != "" {
 			if entry.credits == nil {
 				entry.credits = map[string]string{}
@@ -973,8 +981,14 @@ func MergeSameNameModels(models []pluginapi.ModelInfo) []pluginapi.ModelInfo {
 		if core.ModelSupportsImages(model) {
 			target.SupportedInputModalities = appendUnique(target.SupportedInputModalities, "image")
 		}
-		if core.ModelSupportsTools(model) {
+		// 能力取或：任一条目支持工具调用，合并结果就要同时声明方法和参数。
+		// 只并 tool_calls 会留下「方法有、参数没有」的矛盾组合，客户端据此
+		// 隐藏工具开关，实际支持工具的模型反而丢了能力。
+		if core.ModelSupportsTools(*target) || core.ModelSupportsTools(model) {
 			target.SupportedGenerationMethods = appendUnique(target.SupportedGenerationMethods, "tool_calls")
+			for _, param := range core.ToolParameters {
+				target.SupportedParameters = appendUnique(target.SupportedParameters, param)
+			}
 		}
 		target.Thinking = mergeThinking(target.Thinking, model.Thinking)
 	}

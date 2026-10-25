@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // TestModelInfoDeclaresToolsOnlyWhenSupported 锁定 supported_parameters 的声明。
 //
@@ -12,36 +15,26 @@ func TestModelInfoDeclaresToolsOnlyWhenSupported(t *testing.T) {
 	withoutTools := ModelInfoToPluginAPI("demo", ModelDescriptor{ID: "plain"})
 
 	for _, param := range []string{"temperature", "top_p", "max_tokens", "stream"} {
-		if !hasParameter(withTools.SupportedParameters, param) {
+		if !slices.Contains(withTools.SupportedParameters, param) {
 			t.Fatalf("支持工具的模型缺少基础参数 %q: %v", param, withTools.SupportedParameters)
 		}
-		if !hasParameter(withoutTools.SupportedParameters, param) {
+		if !slices.Contains(withoutTools.SupportedParameters, param) {
 			t.Fatalf("普通模型缺少基础参数 %q: %v", param, withoutTools.SupportedParameters)
 		}
 	}
-	for _, param := range []string{"tools", "tool_choice"} {
-		if !hasParameter(withTools.SupportedParameters, param) {
+	for _, param := range ToolParameters {
+		if !slices.Contains(withTools.SupportedParameters, param) {
 			t.Fatalf("支持工具的模型缺少 %q: %v", param, withTools.SupportedParameters)
 		}
-		if hasParameter(withoutTools.SupportedParameters, param) {
+		if slices.Contains(withoutTools.SupportedParameters, param) {
 			t.Fatalf("不支持工具的模型不应声明 %q: %v", param, withoutTools.SupportedParameters)
 		}
 	}
 
-	if !hasParameter(withTools.SupportedGenerationMethods, "tool_calls") {
+	if !slices.Contains(withTools.SupportedGenerationMethods, "tool_calls") {
 		t.Fatalf("支持工具的模型缺少 tool_calls: %v", withTools.SupportedGenerationMethods)
 	}
-	if hasParameter(withoutTools.SupportedGenerationMethods, "tool_calls") {
+	if slices.Contains(withoutTools.SupportedGenerationMethods, "tool_calls") {
 		t.Fatalf("不支持工具的模型不应声明 tool_calls: %v", withoutTools.SupportedGenerationMethods)
 	}
-}
-
-// hasParameter 报告列表里是否含某个参数名。
-func hasParameter(params []string, want string) bool {
-	for _, param := range params {
-		if param == want {
-			return true
-		}
-	}
-	return false
 }

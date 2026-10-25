@@ -6,6 +6,12 @@ import (
 	"freetier2api-plugin/cpasdk/pluginapi"
 )
 
+// ToolParameters 是声明「支持工具调用」时必须一并列出的参数。
+//
+// 注册转换与 admin 的合并/回灌路径共用这一份，避免字面量散落后再出现
+// 「方法声明了 tool_calls、参数却没有 tools」这种自相矛盾。
+var ToolParameters = []string{"tools", "tool_choice"}
+
 // ModelInfoToPluginAPI 把中立的模型描述转成宿主契约类型。
 //
 // vendorID 填充 OwnedBy；模型 ID 保持裸名（见 SplitModelID 的说明）。
@@ -28,9 +34,9 @@ func ModelInfoToPluginAPI(vendorID string, info ModelDescriptor) pluginapi.Model
 		MaxCompletionTokens:      info.MaxOutputTokens,
 		OutputTokenLimit:         info.MaxOutputTokens,
 		SupportedInputModalities: []string{"text"},
-		// 参数能力必须跟着模型声明走：把 tools / tool_choice 无条件列给所有
-		// 模型，会让客户端对不支持工具调用的模型也渲染工具开关，发出去就是
-		// 上游 400。基础采样参数是全部对话模型都接受的，保留。
+		// 参数能力必须跟着模型声明走：无条件列出会让客户端对不支持工具调用的
+		// 模型也渲染工具开关，发出去就是上游 400。基础采样参数是所有对话模型
+		// 都接受的，始终保留。
 		SupportedParameters: []string{"temperature", "top_p", "max_tokens", "stream"},
 	}
 	if info.SupportsImages {
@@ -38,7 +44,7 @@ func ModelInfoToPluginAPI(vendorID string, info ModelDescriptor) pluginapi.Model
 	}
 	if info.SupportsTools {
 		out.SupportedGenerationMethods = append(out.SupportedGenerationMethods, "tool_calls")
-		out.SupportedParameters = append(out.SupportedParameters, "tools", "tool_choice")
+		out.SupportedParameters = append(out.SupportedParameters, ToolParameters...)
 	}
 	if len(info.Efforts) > 0 || info.DefaultEffort != "" {
 		out.Thinking = &pluginapi.ThinkingSupport{
