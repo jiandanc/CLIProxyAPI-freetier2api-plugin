@@ -36,7 +36,8 @@ type Model struct {
 	IsReasoning     bool
 	SupportsImages  bool
 	SupportsTools   bool
-	// Credits 是上游 creditConsumptionLevel 的档位文案（「低」/「中」/「高」）。
+	// Credits 是上游 creditConsumptionLevel 的档位文案（「低」/「中」/「高」），
+	// 也可能是数字档位编号——数字会被转成「档位 N」，不参与倍率归一化。
 	//
 	// 它是「这一档要扣多少点数」的文字档位，不是折扣倍数，**不能**换算成
 	// 数字倍率；上游没给就是空串（控制台显示「—」，不臆造成免费）。

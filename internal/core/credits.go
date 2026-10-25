@@ -18,7 +18,7 @@ type CreditTable struct {
 // Replace 用一轮探测的结果整表替换。
 //
 // nil 或空表表示「这一轮没有倍率」，读取端会拿到 nil 并显示「—」，而不是
-// 保留上一轮的陈旧数据。
+// 保留上一轮的陈旧数据。表来自调用方时做一次清洗（空 ID / 空文案）。
 func (t *CreditTable) Replace(credits map[string]string) {
 	next := make(map[string]string, len(credits))
 	for id, label := range credits {
@@ -30,8 +30,13 @@ func (t *CreditTable) Replace(credits map[string]string) {
 			next[id] = label
 		}
 	}
+	t.store(next)
+}
+
+// store 接收已清洗的表，不再重复过滤。
+func (t *CreditTable) store(byModel map[string]string) {
 	t.mu.Lock()
-	t.byModel = next
+	t.byModel = byModel
 	t.mu.Unlock()
 }
 
@@ -55,7 +60,7 @@ func FillCredits[T any](t *CreditTable, models []T, id func(T) string, label fun
 			next[modelID] = rate
 		}
 	}
-	t.Replace(next)
+	t.store(next)
 }
 
 // Snapshot 返回整表副本；空表返回 nil，调用方据此判定「未知」。

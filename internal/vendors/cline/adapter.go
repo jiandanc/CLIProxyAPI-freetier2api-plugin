@@ -104,13 +104,9 @@ func (v *adapter) StaticModels(ctx context.Context) ([]pluginapi.ModelInfo, erro
 
 // modelsToPluginAPI 把上游模型条目转成宿主契约类型。
 func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
-	credits := make(map[string]string, len(models))
-	for _, model := range models {
-		if label := costLabel(model.Cost); label != "" {
-			credits[model.ID] = label
-		}
-	}
-	v.credits.Replace(credits)
+	core.FillCredits(&v.credits, models,
+		func(model Model) string { return model.ID },
+		func(model Model) string { return costLabel(model.Cost) })
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		id := strings.TrimSpace(model.ID)
 		if id == "" {

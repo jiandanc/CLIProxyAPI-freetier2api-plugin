@@ -15,7 +15,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -475,15 +474,6 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 // 只报倍率这一维信息，模型清单本身由目录层从注册结果推导。
 func (v *adapter) ModelCredits() map[string]string {
 	return v.credits.Snapshot()
-}
-
-// rateLabel 把上游的 price_factor 转成形如 0.08X 的展示文案。
-func rateLabel(factor float64) string {
-	// 0 是合法倍率（限免），保留；负数与非有限值才算未提供。
-	if factor < 0 || math.IsInf(factor, 0) || math.IsNaN(factor) {
-		return ""
-	}
-	return fmt.Sprintf("%.2fX", factor)
 }
 
 // describeModel 拼接模型说明（带价格倍率）。
