@@ -35,6 +35,29 @@ func (t *CreditTable) Replace(credits map[string]string) {
 	t.mu.Unlock()
 }
 
+// FillCredits 把一批模型的倍率文案归一化后整表写入 t：id 取对外模型 ID，
+// label 取上游原始文案（缺失返回空串）。空 ID、空文案都跳过——未知不写进表。
+//
+// 「遍历模型 → 归一化 → 整表替换」原本在六家供应商各抄了一份（连字段名都
+// 一样），收在这里之后，各家只提供两个取字段的函数。
+func FillCredits[T any](t *CreditTable, models []T, id func(T) string, label func(T) string) {
+	next := make(map[string]string, len(models))
+	for _, model := range models {
+		modelID := strings.TrimSpace(id(model))
+		if modelID == "" {
+			continue
+		}
+		raw := strings.TrimSpace(label(model))
+		if raw == "" {
+			continue
+		}
+		if rate := FormatRate(raw); rate != "" {
+			next[modelID] = rate
+		}
+	}
+	t.Replace(next)
+}
+
 // Snapshot 返回整表副本；空表返回 nil，调用方据此判定「未知」。
 func (t *CreditTable) Snapshot() map[string]string {
 	t.mu.RLock()

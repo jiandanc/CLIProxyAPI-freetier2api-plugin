@@ -186,13 +186,9 @@ func (v *adapter) ModelsForAuth(ctx context.Context, cred *core.Credential) ([]p
 // 上一批」的错配。AutoClaw 的倍率是上游的计费档位文案（低/中/高），
 // 原样透传，不做数字换算。
 func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
-	credits := make(map[string]string, len(models))
-	for _, model := range models {
-		if label := core.FormatRate(model.Credits); label != "" {
-			credits[model.ID] = label
-		}
-	}
-	v.credits.Replace(credits)
+	core.FillCredits(&v.credits, models,
+		func(model Model) string { return model.ID },
+		func(model Model) string { return model.Credits })
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		id := strings.TrimSpace(model.ID)
 		if id == "" {

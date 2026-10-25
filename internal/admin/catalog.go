@@ -564,7 +564,9 @@ func (c *Catalog) LoadCachedState(cached []core.CachedModel) {
 			InputTokenLimit: item.ContextLength, MaxCompletionTokens: item.MaxOutputTokens,
 			OutputTokenLimit: item.MaxOutputTokens, Thinking: thinkingFromCached(item),
 		})
-		if rate := core.FormatRate(item.Credits); rate != "" {
+		// 倍率在写入缓存前已由供应商归一化（cacheProbed → creditsFromProvider），
+		// 这里原样还原即可；再格式化一次会把 0.00X 之类的合法值重新解释。
+		if rate := strings.TrimSpace(item.Credits); rate != "" {
 			if entry.credits == nil {
 				entry.credits = map[string]string{}
 			}

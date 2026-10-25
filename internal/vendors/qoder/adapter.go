@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -435,7 +436,14 @@ func (v *adapter) bridgeCacheKey(cred *Credential) string {
 // Qoder 加密网关要求的 model_config.key / x-model-key。
 func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 	slugByKey := v.models.replace(models)
-	credits := make(map[string]string, len(models))
+	core.FillCredits(&v.credits, models,
+		func(model Model) string { return slugByKey[strings.TrimSpace(model.Key)] },
+		func(model Model) string {
+			if model.PriceFactor == nil {
+				return ""
+			}
+			return strconv.FormatFloat(*model.PriceFactor, 'f', -1, 64)
+		})
 	registered := core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		key := strings.TrimSpace(model.Key)
 		if key == "" {
@@ -449,11 +457,6 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 		if name == "" {
 			name = key
 		}
-		if model.PriceFactor != nil {
-			if rate := rateLabel(*model.PriceFactor); rate != "" {
-				credits[id] = rate
-			}
-		}
 		return core.ModelDescriptor{
 			ID:                 id,
 			Name:               name,
@@ -464,7 +467,6 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 			CanDisableThinking: !model.IsReasoning,
 		}, true
 	})
-	v.credits.Replace(credits)
 	return registered
 }
 

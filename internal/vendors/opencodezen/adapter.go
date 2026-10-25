@@ -121,13 +121,9 @@ func (v *adapter) ModelsForAuth(ctx context.Context, cred *core.Credential) ([]p
 // 元数据字段可能已被 models.dev 目录补全（见 models.go）；仍缺的
 // 上下文/输出上限在这里走通用兜底。倍率与清单必须出自同一轮探测。
 func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
-	credits := make(map[string]string, len(models))
-	for _, model := range models {
-		if label := core.FormatRate(model.Credits); label != "" {
-			credits[model.ID] = label
-		}
-	}
-	v.credits.Replace(credits)
+	core.FillCredits(&v.credits, models,
+		func(model Model) string { return model.ID },
+		func(model Model) string { return model.Credits })
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		id := strings.TrimSpace(model.ID)
 		if id == "" {

@@ -44,3 +44,37 @@ func TestCreditTableReplaceAndSnapshot(t *testing.T) {
 		t.Fatalf("空表替换后应返回 nil，实际 %v", got)
 	}
 }
+
+// TestFillCreditsNormalizesAndReplaces 锁定六家共用的入表口径：
+// 原始文案统一过 FormatRate，空 ID / 空文案不写进表，空批次清空上一轮。
+func TestFillCreditsNormalizesAndReplaces(t *testing.T) {
+	type item struct {
+		ID  string
+		Raw string
+	}
+	var table CreditTable
+	FillCredits(&table, []item{
+		{"a", "x0.5 credits"},
+		{" b ", "1"},
+		{"", "0.9"},
+		{"c", ""},
+		{"d", "免费"},
+		{"e", "-1"},
+	}, func(m item) string { return m.ID }, func(m item) string { return m.Raw })
+
+	want := map[string]string{"a": "0.50X", "b": "1.00X", "d": "免费"}
+	got := table.Snapshot()
+	if len(got) != len(want) {
+		t.Fatalf("snapshot = %v, want %v", got, want)
+	}
+	for id, label := range want {
+		if got[id] != label {
+			t.Fatalf("snapshot[%s] = %q, want %q", id, got[id], label)
+		}
+	}
+
+	FillCredits(&table, nil, func(m item) string { return m.ID }, func(m item) string { return m.Raw })
+	if table.Snapshot() != nil {
+		t.Fatal("empty batch must clear the table")
+	}
+}
