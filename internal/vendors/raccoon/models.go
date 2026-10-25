@@ -35,6 +35,11 @@ type Model struct {
 	MaxOutputTokens int64
 	IsReasoning     bool
 	SupportsTools   bool
+	// SupportsImages 由目录条目的 tags 推断（vision / image / image-understanding）。
+	SupportsImages bool
+	// Credits 是上游给出的计费倍率原文（形如 "0.8"、"x0.05"）；
+	// 空串表示上游没给——不能当成 0，更不能当成「免费」。
+	Credits string
 }
 
 // FetchModels 拉取模型目录。
@@ -114,16 +119,22 @@ func parseCatalog(body []byte) ([]Model, error) {
 
 // catalogEntry 是目录条目的原始形态。
 type catalogEntry struct {
-	Name               string   `json:"name"`
-	ModelName          string   `json:"model_name"`
-	Description        string   `json:"description"`
-	DisplayDescription string   `json:"display_description"`
-	Visible            *bool    `json:"visible"`
-	ContextWindow      *flexInt `json:"context_window"`
-	MaxTokens          *flexInt `json:"max_tokens"`
-	Params             *struct {
-		ContextWindow *flexInt `json:"context_window"`
-		MaxTokens     *flexInt `json:"max_tokens"`
+	Name               string    `json:"name"`
+	ModelName          string    `json:"model_name"`
+	Description        string    `json:"description"`
+	DisplayDescription string    `json:"display_description"`
+	Visible            *bool     `json:"visible"`
+	Tags               []string  `json:"tags"`
+	ContextWindow      *flexInt  `json:"context_window"`
+	MaxTokens          *flexInt  `json:"max_tokens"`
+	BillingMultiplier  *flexText `json:"billing_multiplier"`
+	// BillingEffectiveMultiplier 是计入活动与限免后的实付倍率：
+	// 用户真正会被扣的那个数；缺省时回落基准倍率。
+	BillingEffectiveMultiplier *flexText `json:"billing_effective_multiplier"`
+	Params                     *struct {
+		ContextWindow     *flexInt  `json:"context_window"`
+		MaxTokens         *flexInt  `json:"max_tokens"`
+		BillingMultiplier *flexText `json:"billing_multiplier"`
 	} `json:"params"`
 }
 
@@ -146,6 +157,39 @@ func (f *flexInt) UnmarshalJSON(data []byte) error {
 	}
 	*f = flexInt(value)
 	return nil
+}
+
+// flexText 兼容数字与字符串两种形态，并保留原始文本。
+//
+// billing_multiplier 上游发过 0.8（数字）与 "x0.05"（字符串）两种形态。
+// 倍率既要能归一化成 "0.80X" 这类展示文案，也要能在上游给非数值文案时
+// 原样保留，因此不解析成 float64。
+type flexText string
+
+// UnmarshalJSON 兼容 JSON 数字与字符串。
+func (f *flexText) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		return nil
+	}
+	if strings.HasPrefix(trimmed, "\"") {
+		var text string
+		if err := json.Unmarshal(data, &text); err != nil {
+			return fmt.Errorf("flexText: %w", err)
+		}
+		*f = flexText(strings.TrimSpace(text))
+		return nil
+	}
+	*f = flexText(trimmed)
+	return nil
+}
+
+// value 返回原始文本；nil 接收者返回空串。
+func (f *flexText) value() string {
+	if f == nil {
+		return ""
+	}
+	return strings.TrimSpace(string(*f))
 }
 
 // normalize 把原始条目归一成 Model（缺 id 丢弃；visible 缺省 true）。
@@ -177,6 +221,9 @@ func (e *catalogEntry) normalize() (Model, bool) {
 		MaxOutputTokens: maxTokens,
 		IsReasoning:     true,
 		SupportsTools:   true,
+		SupportsImages:  supportsImageTags(e.Tags),
+		// 实付倍率优先：用户真正会被扣的是这个数（折扣/限免期间与基准价不同）。
+		Credits: firstText(e.BillingEffectiveMultiplier, e.BillingMultiplier, e.nestedBillingMultiplier()),
 	}, true
 }
 
@@ -194,6 +241,13 @@ func (e *catalogEntry) nestedMaxTokens() *flexInt {
 	return e.Params.MaxTokens
 }
 
+func (e *catalogEntry) nestedBillingMultiplier() *flexText {
+	if e.Params == nil {
+		return nil
+	}
+	return e.Params.BillingMultiplier
+}
+
 // firstFloat 返回第一个非 nil 的数值（取整）。
 func firstFloat(values ...*flexInt) int64 {
 	for _, value := range values {
@@ -202,6 +256,30 @@ func firstFloat(values ...*flexInt) int64 {
 		}
 	}
 	return 0
+}
+
+// firstText 返回第一个非空的文本。
+func firstText(values ...*flexText) string {
+	for _, value := range values {
+		if text := value.value(); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+// supportsImageTags 判断目录条目的 tags 是否声明了视觉能力。
+//
+// 上游目录**没有** supportImage 字段，源实现就是从 tags 里认这三个词；
+// 不认就是漏报（视觉模型在控制台「能力」列显示为空）。
+func supportsImageTags(tags []string) bool {
+	for _, tag := range tags {
+		switch strings.ToLower(strings.TrimSpace(tag)) {
+		case "vision", "image", "image-understanding":
+			return true
+		}
+	}
+	return false
 }
 
 // StaticFallbackModels 是目录拉不到时的兜底单条（保证 /v1/models 不空表）。

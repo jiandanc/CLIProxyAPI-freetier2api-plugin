@@ -93,6 +93,62 @@ func TestParseCatalogShapes(t *testing.T) {
 	}
 }
 
+func TestParseCatalogBillingMultiplier(t *testing.T) {
+	// 上游把 billing_multiplier 发成数字、字符串、嵌 params 三种形态；
+	// 0 是合法倍率（限免档），缺失才是「没提供」，负数属于异常数据。
+	body := `{"code":0,"data":{"categories":[
+		{"type":"a","models":[
+			{"name":"num","billing_multiplier":0.8},
+			{"name":"str","billing_multiplier":"x0.05"},
+			{"name":"nested","params":{"billing_multiplier":"1.00"}},
+			{"name":"zero","billing_multiplier":0},
+			{"name":"neg","billing_multiplier":-1},
+			{"name":"missing"}
+		]}
+	]}}`
+	models, errParse := parseCatalog([]byte(body))
+	if errParse != nil {
+		t.Fatalf("parse: %v", errParse)
+	}
+	// Model.Credits 保留上游原文（含 "0"），过滤只发生在倍率表边界。
+	wantRaw := map[string]string{"num": "0.8", "str": "x0.05", "nested": "1.00", "zero": "0", "neg": "-1"}
+	for _, model := range models {
+		if want, ok := wantRaw[model.ID]; ok {
+			if model.Credits != want {
+				t.Fatalf("%s.Credits = %q, want %q", model.ID, model.Credits, want)
+			}
+			continue
+		}
+		if model.Credits != "" {
+			t.Fatalf("%s.Credits = %q, want empty", model.ID, model.Credits)
+		}
+	}
+
+	v := &adapter{}
+	if got := v.modelsToPluginAPI(models); len(got) != len(models) {
+		t.Fatalf("plugin models = %d, want %d", len(got), len(models))
+	}
+	credits := v.ModelCredits()
+	want := map[string]string{"num": "0.80X", "str": "0.05X", "nested": "1.00X", "zero": "0.00X"}
+	if len(credits) != len(want) {
+		t.Fatalf("credits = %v, want %v", credits, want)
+	}
+	for id, label := range want {
+		if credits[id] != label {
+			t.Fatalf("credits[%s] = %q, want %q", id, credits[id], label)
+		}
+	}
+	for _, id := range []string{"neg", "missing"} {
+		if _, ok := credits[id]; ok {
+			t.Fatalf("credits should not contain %q: %v", id, credits)
+		}
+	}
+	credits["num"] = "mutated"
+	if v.ModelCredits()["num"] != "0.80X" {
+		t.Fatal("ModelCredits must return a copy")
+	}
+}
+
 func TestParseCatalogBusinessError(t *testing.T) {
 	if _, err := parseCatalog([]byte(`{"code":14018,"message":"积分不足"}`)); err == nil {
 		t.Fatal("expected business error")

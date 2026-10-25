@@ -16,8 +16,11 @@ package raccoon
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
@@ -34,6 +37,13 @@ type adapter struct {
 	authBase   string
 	pointsBase string
 	origin     string
+
+	// credits 是「官方模型 ID → 计费倍率文案」，与 models 同源同生命周期。
+	//
+	// 宿主契约（pluginapi.ModelInfo）没有倍率字段，控制台只能通过
+	// core.CreditsProvider 拿到，因此和模型清单在同一轮解析里一起产出。
+	creditsMu sync.RWMutex
+	credits   map[string]string
 }
 
 // Instances 构造小浣熊实例（只有一个，没有区域之分）。
@@ -122,7 +132,7 @@ func (v *adapter) StaticModels(ctx context.Context) ([]pluginapi.ModelInfo, erro
 	if errModels != nil {
 		return nil, errModels
 	}
-	return modelsToPluginAPI(models), nil
+	return v.modelsToPluginAPI(models), nil
 }
 
 // ModelsForAuth 返回该凭证可用的模型。
@@ -139,11 +149,23 @@ func (v *adapter) ModelsForAuth(ctx context.Context, cred *core.Credential) ([]p
 		logger.Info("raccoon: model catalog fallback to static: %v", errModels)
 		models = StaticFallbackModels()
 	}
-	return modelsToPluginAPI(models), nil
+	return v.modelsToPluginAPI(models), nil
 }
 
-// modelsToPluginAPI 把目录条目转成宿主契约类型。
-func modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
+// modelsToPluginAPI 把目录条目转成宿主契约类型，顺带记下倍率表。
+//
+// 倍率与清单必须出自同一轮探测：分开取会出现「模型换了一批、倍率还是
+// 上一批」的错配（与 cline / qoder 的处理一致）。
+func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
+	credits := make(map[string]string, len(models))
+	for _, model := range models {
+		if label := multiplierLabel(model.Credits); label != "" {
+			credits[model.ID] = label
+		}
+	}
+	v.creditsMu.Lock()
+	v.credits = credits
+	v.creditsMu.Unlock()
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		id := strings.TrimSpace(model.ID)
 		if id == "" {
@@ -156,9 +178,47 @@ func modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 			ContextLength:      model.ContextWindow,
 			MaxOutputTokens:    model.MaxOutputTokens,
 			SupportsTools:      model.SupportsTools,
+			SupportsImages:     model.SupportsImages,
 			CanDisableThinking: !model.IsReasoning,
 		}, true
 	})
+}
+
+// ModelCredits 实现 core.CreditsProvider：返回「官方模型 ID → 计费倍率」。
+//
+// 倍率取自目录条目的 billing_effective_multiplier（实付）并回落
+// billing_multiplier，交给 core.FormatRate 归一化成 "0.80X" 这类统一文案；
+// 上游没给的模型不进表，控制台据此显示「—」而不是把「没提供」画成「免费」。
+func (v *adapter) ModelCredits() map[string]string {
+	v.creditsMu.RLock()
+	defer v.creditsMu.RUnlock()
+	if len(v.credits) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(v.credits))
+	for id, value := range v.credits {
+		out[id] = value
+	}
+	return out
+}
+
+// multiplierLabel 把上游倍率原文转成展示文案；取不到合法数值时不进表。
+//
+// 0 是**合法**倍率（限免 / 免费档）：把它当成「没提供」丢掉，控制台会显示
+// 「—」，把「这个模型这轮免费」误读成「倍率未知」。只有负数与非有限值才算
+// 异常数据，不能当成倍率展示。
+func multiplierLabel(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	numeric := strings.TrimPrefix(strings.TrimSuffix(strings.ToLower(trimmed), "x"), "x")
+	if value, errParse := strconv.ParseFloat(numeric, 64); errParse == nil {
+		if value < 0 || math.IsInf(value, 0) || math.IsNaN(value) {
+			return ""
+		}
+	}
+	return core.FormatRate(trimmed)
 }
 
 // ---- 执行 ----
@@ -368,6 +428,7 @@ var (
 	_ core.CheckinProvider      = (*adapter)(nil)
 	_ core.Configurable         = (*adapter)(nil)
 	_ core.ConfigFieldsProvider = (*adapter)(nil)
+	_ core.CreditsProvider      = (*adapter)(nil)
 	_ core.LoginProvider        = (*adapter)(nil)
 	_ core.ModelsProvider       = (*adapter)(nil)
 	_ core.QuotaProvider        = (*adapter)(nil)
