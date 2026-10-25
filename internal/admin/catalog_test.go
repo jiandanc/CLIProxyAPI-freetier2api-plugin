@@ -226,7 +226,7 @@ func TestMergeSameNameModelsUnionsToolParameters(t *testing.T) {
 		if !slices.Contains(merged[0].SupportedGenerationMethods, "tool_calls") {
 			t.Fatalf("%s: methods = %#v", name, merged[0].SupportedGenerationMethods)
 		}
-		for _, param := range core.ToolParameters {
+		for _, param := range []string{"tools", "tool_choice"} {
 			if !slices.Contains(merged[0].SupportedParameters, param) {
 				t.Fatalf("%s: params = %#v，缺 %q", name, merged[0].SupportedParameters, param)
 			}
@@ -256,7 +256,7 @@ func TestLoadCachedStateRestoresCapabilities(t *testing.T) {
 	if !slices.Contains(info.SupportedGenerationMethods, "tool_calls") {
 		t.Fatalf("methods = %#v，缺 tool_calls", info.SupportedGenerationMethods)
 	}
-	for _, param := range core.ToolParameters {
+	for _, param := range []string{"tools", "tool_choice"} {
 		if !slices.Contains(info.SupportedParameters, param) {
 			t.Fatalf("params = %#v，缺 %q", info.SupportedParameters, param)
 		}

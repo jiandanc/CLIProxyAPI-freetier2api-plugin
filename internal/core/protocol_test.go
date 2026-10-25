@@ -22,7 +22,11 @@ func TestModelInfoDeclaresToolsOnlyWhenSupported(t *testing.T) {
 			t.Fatalf("普通模型缺少基础参数 %q: %v", param, withoutTools.SupportedParameters)
 		}
 	}
-	for _, param := range ToolParameters {
+	// 字面量钉死：常量若被改名/改值，这里的期望不能跟着一起变，否则测试形同虚设。
+	if !slices.Equal(ToolParameters, []string{"tools", "tool_choice"}) {
+		t.Fatalf("ToolParameters = %#v", ToolParameters)
+	}
+	for _, param := range []string{"tools", "tool_choice"} {
 		if !slices.Contains(withTools.SupportedParameters, param) {
 			t.Fatalf("支持工具的模型缺少 %q: %v", param, withTools.SupportedParameters)
 		}
