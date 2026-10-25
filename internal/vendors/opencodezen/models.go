@@ -50,6 +50,11 @@ type Model struct {
 	SupportsImages bool
 	// Efforts 是可选的推理档位（来自 models.dev 目录）。
 	Efforts []string
+	// Credits 是计费展示文案。
+	//
+	// 只在上游目录明确「输入与输出单价都是 0」时记为「免费」；价格不是倍率，
+	// 有价格的模型不进倍率列（显示「—」），不把美元价伪装成折扣倍数。
+	Credits string
 }
 
 // FetchModels 拉取上游模型清单。
@@ -208,6 +213,17 @@ type modelsDevEntry struct {
 		Context int64 `json:"context"`
 		Output  int64 `json:"output"`
 	} `json:"limit"`
+	// Cost 是 models.dev 的价格（美元/百万 token，不是倍率）。指针用于区分
+	// 「没有 cost 块」与「cost 全为 0」——前者不能当成免费。
+	Cost *modelsDevCost `json:"cost"`
+}
+
+// modelsDevCost 是 models.dev 的单价（美元/百万 token）。
+//
+// 它不是倍率：换算成折扣倍数没有意义，只用来判定「是否免费」。
+type modelsDevCost struct {
+	Input  float64 `json:"input"`
+	Output float64 `json:"output"`
 }
 
 // modelsDevCatalog 是 provider 下的模型 ID → 条目表。
@@ -342,6 +358,10 @@ func applyModelsDevCatalog(models []Model, catalog modelsDevCatalog) {
 		}
 		if model.Description == "" && entry.Description != "" {
 			model.Description = entry.Description
+		}
+		// 免费信号来自目录的 price 全 0；只做这一种判定，价格本身不进倍率列。
+		if model.Credits == "" && entry.Cost != nil && entry.Cost.Input == 0 && entry.Cost.Output == 0 {
+			model.Credits = "免费"
 		}
 	}
 }

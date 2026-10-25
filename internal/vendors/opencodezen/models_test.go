@@ -123,3 +123,43 @@ func TestEffortsFromModelsDevIgnoresNonEffortOptions(t *testing.T) {
 		t.Fatalf("efforts = %v, verbosity option must be ignored", efforts)
 	}
 }
+
+// TestApplyModelsDevCatalogMarksFreeOnlyOnZeroPrice 锁定「免费」的判定来源。
+//
+// models.dev 的 cost 是美元单价，不是倍率；只有输入与输出单价都为 0 才是
+// 免费信号。没有 cost 块的条目不能当成免费——那只是目录缺数据。
+func TestApplyModelsDevCatalogMarksFreeOnlyOnZeroPrice(t *testing.T) {
+	models := []Model{{ID: "free-model"}, {ID: "paid-model"}, {ID: "unknown-model"}}
+	catalog := modelsDevCatalog{
+		"free-model":    {Cost: &modelsDevCost{}},
+		"paid-model":    {Cost: &modelsDevCost{Input: 1.5, Output: 2}},
+		"unknown-model": {},
+	}
+	applyModelsDevCatalog(models, catalog)
+
+	if models[0].Credits != "免费" {
+		t.Fatalf("零单价应记免费，实际 %q", models[0].Credits)
+	}
+	if models[1].Credits != "" {
+		t.Fatalf("有价格的模型不能伪装成倍率，实际 %q", models[1].Credits)
+	}
+	if models[2].Credits != "" {
+		t.Fatalf("缺 cost 块不能当免费，实际 %q", models[2].Credits)
+	}
+}
+
+// TestAdapterModelCredits 锁定倍率表与清单同源。
+func TestAdapterModelCredits(t *testing.T) {
+	v := &adapter{}
+	v.modelsToPluginAPI([]Model{
+		{ID: "deepseek-v4-flash-free", Credits: "免费"},
+		{ID: "plain"},
+	})
+	credits := v.ModelCredits()
+	if got := credits["deepseek-v4-flash-free"]; got != "免费" {
+		t.Fatalf("倍率 = %q, want 免费", got)
+	}
+	if _, exists := credits["plain"]; exists {
+		t.Fatal("没有倍率的模型不应进表")
+	}
+}

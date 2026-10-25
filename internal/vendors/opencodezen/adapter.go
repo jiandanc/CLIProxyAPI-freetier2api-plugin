@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
 	"freetier2api-plugin/internal/core"
@@ -29,6 +30,9 @@ type adapter struct {
 	baseURL string
 	// modelsDev 是 models.dev 目录缓存，随实例隔离。
 	modelsDev modelsDevCache
+	// credits 缓存最近一轮探测的倍率表（官方模型 ID → 展示文案）。
+	creditsMu sync.RWMutex
+	credits   map[string]string
 }
 
 // Instances 构造 ZEN 实例（只有一个，没有区域之分）。
@@ -114,11 +118,20 @@ func (v *adapter) ModelsForAuth(ctx context.Context, cred *core.Credential) ([]p
 	return v.modelsToPluginAPI(models), nil
 }
 
-// modelsToPluginAPI 把上游模型条目转成宿主契约类型。
+// modelsToPluginAPI 把上游模型条目转成宿主契约类型，顺带记下倍率表。
 //
 // 元数据字段可能已被 models.dev 目录补全（见 models.go）；仍缺的
-// 上下文/输出上限在这里走通用兜底。
+// 上下文/输出上限在这里走通用兜底。倍率与清单必须出自同一轮探测。
 func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
+	credits := make(map[string]string, len(models))
+	for _, model := range models {
+		if label := core.FormatRate(model.Credits); label != "" {
+			credits[model.ID] = label
+		}
+	}
+	v.creditsMu.Lock()
+	v.credits = credits
+	v.creditsMu.Unlock()
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		id := strings.TrimSpace(model.ID)
 		if id == "" {
@@ -152,6 +165,20 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 			CanDisableThinking: !model.IsReasoning,
 		}, true
 	})
+}
+
+// ModelCredits 实现 core.CreditsProvider：返回「官方模型 ID → 计费文案」。
+func (v *adapter) ModelCredits() map[string]string {
+	v.creditsMu.RLock()
+	defer v.creditsMu.RUnlock()
+	if len(v.credits) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(v.credits))
+	for id, value := range v.credits {
+		out[id] = value
+	}
+	return out
 }
 
 // ---- 执行 ----
@@ -221,4 +248,5 @@ var (
 	_ core.Configurable         = (*adapter)(nil)
 	_ core.ConfigFieldsProvider = (*adapter)(nil)
 	_ core.ModelsProvider       = (*adapter)(nil)
+	_ core.CreditsProvider      = (*adapter)(nil)
 )
