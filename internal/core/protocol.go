@@ -28,13 +28,17 @@ func ModelInfoToPluginAPI(vendorID string, info ModelDescriptor) pluginapi.Model
 		MaxCompletionTokens:      info.MaxOutputTokens,
 		OutputTokenLimit:         info.MaxOutputTokens,
 		SupportedInputModalities: []string{"text"},
-		SupportedParameters:      []string{"temperature", "top_p", "max_tokens", "stream", "tools", "tool_choice"},
+		// 参数能力必须跟着模型声明走：把 tools / tool_choice 无条件列给所有
+		// 模型，会让客户端对不支持工具调用的模型也渲染工具开关，发出去就是
+		// 上游 400。基础采样参数是全部对话模型都接受的，保留。
+		SupportedParameters: []string{"temperature", "top_p", "max_tokens", "stream"},
 	}
 	if info.SupportsImages {
 		out.SupportedInputModalities = append(out.SupportedInputModalities, "image")
 	}
 	if info.SupportsTools {
 		out.SupportedGenerationMethods = append(out.SupportedGenerationMethods, "tool_calls")
+		out.SupportedParameters = append(out.SupportedParameters, "tools", "tool_choice")
 	}
 	if len(info.Efforts) > 0 || info.DefaultEffort != "" {
 		out.Thinking = &pluginapi.ThinkingSupport{
