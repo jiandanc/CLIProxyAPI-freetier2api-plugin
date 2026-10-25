@@ -166,10 +166,13 @@ func (f *flexInt) UnmarshalJSON(data []byte) error {
 // 原样保留，因此不解析成 float64。
 type flexText string
 
-// UnmarshalJSON 兼容 JSON 数字与字符串。
+// UnmarshalJSON 兼容 JSON 数字与字符串；其余类型一律当「没提供」。
+//
+// 上游把缺数据写成过 true / {}，如果原样留下，控制台会把 "true" 当文案显示。
 func (f *flexText) UnmarshalJSON(data []byte) error {
 	trimmed := strings.TrimSpace(string(data))
 	if trimmed == "" || trimmed == "null" {
+		*f = ""
 		return nil
 	}
 	if strings.HasPrefix(trimmed, "\"") {
@@ -180,7 +183,12 @@ func (f *flexText) UnmarshalJSON(data []byte) error {
 		*f = flexText(strings.TrimSpace(text))
 		return nil
 	}
-	*f = flexText(trimmed)
+	var number json.Number
+	if err := json.Unmarshal(data, &number); err != nil {
+		*f = ""
+		return nil
+	}
+	*f = flexText(number.String())
 	return nil
 }
 

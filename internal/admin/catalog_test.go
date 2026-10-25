@@ -32,7 +32,17 @@ type ratedVendor struct {
 	credits map[string]string
 }
 
-func (v *ratedVendor) ModelCredits() map[string]string { return v.credits }
+// ModelCredits 跟真实供应商一样在本层完成归一化：admin 不再二次格式化，
+// 否则「0」这类合法倍率会被反复改写。
+func (v *ratedVendor) ModelCredits() map[string]string {
+	out := make(map[string]string, len(v.credits))
+	for id, raw := range v.credits {
+		if rate := core.FormatRate(raw); rate != "" {
+			out[id] = rate
+		}
+	}
+	return out
+}
 
 func newTestCatalog(t *testing.T) *Catalog {
 	t.Helper()

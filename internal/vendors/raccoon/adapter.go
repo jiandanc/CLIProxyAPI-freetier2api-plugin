@@ -16,11 +16,8 @@ package raccoon
 import (
 	"context"
 	"fmt"
-	"math"
 	"net/http"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
@@ -42,8 +39,7 @@ type adapter struct {
 	//
 	// 宿主契约（pluginapi.ModelInfo）没有倍率字段，控制台只能通过
 	// core.CreditsProvider 拿到，因此和模型清单在同一轮解析里一起产出。
-	creditsMu sync.RWMutex
-	credits   map[string]string
+	credits core.CreditTable
 }
 
 // Instances 构造小浣熊实例（只有一个，没有区域之分）。
@@ -159,13 +155,11 @@ func (v *adapter) ModelsForAuth(ctx context.Context, cred *core.Credential) ([]p
 func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 	credits := make(map[string]string, len(models))
 	for _, model := range models {
-		if label := multiplierLabel(model.Credits); label != "" {
+		if label := core.FormatRate(model.Credits); label != "" {
 			credits[model.ID] = label
 		}
 	}
-	v.creditsMu.Lock()
-	v.credits = credits
-	v.creditsMu.Unlock()
+	v.credits.Replace(credits)
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		id := strings.TrimSpace(model.ID)
 		if id == "" {
@@ -187,38 +181,10 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 // ModelCredits 实现 core.CreditsProvider：返回「官方模型 ID → 计费倍率」。
 //
 // 倍率取自目录条目的 billing_effective_multiplier（实付）并回落
-// billing_multiplier，交给 core.FormatRate 归一化成 "0.80X" 这类统一文案；
+// billing_multiplier，统一经 core.FormatRate 归一化成 "0.80X" 这类文案；
 // 上游没给的模型不进表，控制台据此显示「—」而不是把「没提供」画成「免费」。
 func (v *adapter) ModelCredits() map[string]string {
-	v.creditsMu.RLock()
-	defer v.creditsMu.RUnlock()
-	if len(v.credits) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(v.credits))
-	for id, value := range v.credits {
-		out[id] = value
-	}
-	return out
-}
-
-// multiplierLabel 把上游倍率原文转成展示文案；取不到合法数值时不进表。
-//
-// 0 是**合法**倍率（限免 / 免费档）：把它当成「没提供」丢掉，控制台会显示
-// 「—」，把「这个模型这轮免费」误读成「倍率未知」。只有负数与非有限值才算
-// 异常数据，不能当成倍率展示。
-func multiplierLabel(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ""
-	}
-	numeric := strings.TrimPrefix(strings.TrimSuffix(strings.ToLower(trimmed), "x"), "x")
-	if value, errParse := strconv.ParseFloat(numeric, 64); errParse == nil {
-		if value < 0 || math.IsInf(value, 0) || math.IsNaN(value) {
-			return ""
-		}
-	}
-	return core.FormatRate(trimmed)
+	return v.credits.Snapshot()
 }
 
 // ---- 执行 ----

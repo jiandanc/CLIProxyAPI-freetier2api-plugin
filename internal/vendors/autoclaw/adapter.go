@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
@@ -43,8 +42,7 @@ type adapter struct {
 	baseURL string
 
 	// credits 缓存最近一轮目录探测的倍率表（官方模型 ID → 展示文案）。
-	creditsMu sync.RWMutex
-	credits   map[string]string
+	credits core.CreditTable
 }
 
 // Instances 构造 AutoClaw 的两个区域实例。
@@ -194,9 +192,7 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 			credits[model.ID] = label
 		}
 	}
-	v.creditsMu.Lock()
-	v.credits = credits
-	v.creditsMu.Unlock()
+	v.credits.Replace(credits)
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		id := strings.TrimSpace(model.ID)
 		if id == "" {
@@ -217,16 +213,7 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 
 // ModelCredits 实现 core.CreditsProvider：返回「官方模型 ID → 计费档位」。
 func (v *adapter) ModelCredits() map[string]string {
-	v.creditsMu.RLock()
-	defer v.creditsMu.RUnlock()
-	if len(v.credits) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(v.credits))
-	for id, value := range v.credits {
-		out[id] = value
-	}
-	return out
+	return v.credits.Snapshot()
 }
 
 // ---- 执行 ----

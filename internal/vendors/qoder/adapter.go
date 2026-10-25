@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -49,8 +50,7 @@ type adapter struct {
 	//
 	// 控制台要展示倍率，但宿主契约（pluginapi.ModelInfo）没有这个字段，
 	// 只能由本实例在转换模型时顺手记下，供 ConsoleModels 回读。
-	creditsMu sync.RWMutex
-	credits   map[string]string
+	credits core.CreditTable
 	// settings 是原始配置键（设备身份需要读 qoder_desktop_version）。
 	settings atomic.Value // map[string]string
 }
@@ -449,8 +449,10 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 		if name == "" {
 			name = key
 		}
-		if rate := rateLabel(model.PriceFactor); rate != "" {
-			credits[id] = rate
+		if model.PriceFactor != nil {
+			if rate := rateLabel(*model.PriceFactor); rate != "" {
+				credits[id] = rate
+			}
 		}
 		return core.ModelDescriptor{
 			ID:                 id,
@@ -462,9 +464,7 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 			CanDisableThinking: !model.IsReasoning,
 		}, true
 	})
-	v.creditsMu.Lock()
-	v.credits = credits
-	v.creditsMu.Unlock()
+	v.credits.Replace(credits)
 	return registered
 }
 
@@ -472,21 +472,13 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 //
 // 只报倍率这一维信息，模型清单本身由目录层从注册结果推导。
 func (v *adapter) ModelCredits() map[string]string {
-	v.creditsMu.RLock()
-	defer v.creditsMu.RUnlock()
-	if len(v.credits) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(v.credits))
-	for id, value := range v.credits {
-		out[id] = value
-	}
-	return out
+	return v.credits.Snapshot()
 }
 
-// rateLabel 把上游的 price_factor 转成形如 0.08X 的展示文案；<=0 视为未提供。
+// rateLabel 把上游的 price_factor 转成形如 0.08X 的展示文案。
 func rateLabel(factor float64) string {
-	if factor <= 0 {
+	// 0 是合法倍率（限免），保留；负数与非有限值才算未提供。
+	if factor < 0 || math.IsInf(factor, 0) || math.IsNaN(factor) {
 		return ""
 	}
 	return fmt.Sprintf("%.2fX", factor)
@@ -501,8 +493,8 @@ func describeModel(model Model) string {
 	if model.IsReasoning {
 		description += "（推理）"
 	}
-	if model.PriceFactor > 0 {
-		description += fmt.Sprintf("，计费倍率 x%.2f", model.PriceFactor)
+	if model.PriceFactor != nil {
+		description += fmt.Sprintf("，计费倍率 x%.2f", *model.PriceFactor)
 	}
 	return description
 }

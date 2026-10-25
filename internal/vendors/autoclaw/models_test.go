@@ -110,7 +110,8 @@ func TestFetchModelsErrorsOnUnknownShape(t *testing.T) {
 // TestFetchModelsParsesCreditLevel 锁定计费档位的透传。
 //
 // 上游 creditConsumptionLevel 是文字档位（低/中/高），不是折扣倍数；原样
-// 透传到倍率列，缺失则留空（控制台显示「—」，不能写成免费）。
+// 透传到倍率列，整数则标成「档位 N」，缺失则留空（控制台显示「—」，不能
+// 写成免费，也不能把 3 格式化成 3.00X）。
 func TestFetchModelsParsesCreditLevel(t *testing.T) {
 	baseURL := serveModels(t, `{"models":[
 	 {"id":"zai_auto","creditConsumptionLevel":"中"},
@@ -122,7 +123,7 @@ func TestFetchModelsParsesCreditLevel(t *testing.T) {
 	if errModels != nil {
 		t.Fatalf("fetch: %v", errModels)
 	}
-	want := map[string]string{"zai_auto": "中", "zai_auto-fast": "低", "numeric": "3", "none": ""}
+	want := map[string]string{"zai_auto": "中", "zai_auto-fast": "低", "numeric": "档位 3", "none": ""}
 	for _, model := range models {
 		if model.Credits != want[model.ID] {
 			t.Fatalf("%s: Credits = %q, want %q", model.ID, model.Credits, want[model.ID])
@@ -141,7 +142,7 @@ func TestFetchModelsParsesCreditLevel(t *testing.T) {
 func TestLevelTextToleratesShapes(t *testing.T) {
 	cases := map[string]string{
 		`"高"`:           "高",
-		`3`:             "3",
+		`3`:             "档位 3", // 整数是档位编号，不能被格式化成伪倍率
 		`null`:          "",
 		``:              "",
 		`{"level":"低"}`: "",
@@ -158,11 +159,15 @@ func TestAdapterModelCredits(t *testing.T) {
 	v := &adapter{}
 	v.modelsToPluginAPI([]Model{
 		{ID: "zai_auto", Credits: "中"},
+		{ID: "tier_3", Credits: "档位 3"},
 		{ID: "plain"},
 	})
 	credits := v.ModelCredits()
 	if got := credits["zai_auto"]; got != "中" {
 		t.Fatalf("倍率 = %q, want 中", got)
+	}
+	if got := credits["tier_3"]; got != "档位 3" {
+		t.Fatalf("整数档位 = %q, want 档位 3（不能变成 3.00X）", got)
 	}
 	if _, exists := credits["plain"]; exists {
 		t.Fatal("没有档位的模型不应进表")

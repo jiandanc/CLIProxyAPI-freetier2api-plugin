@@ -12,6 +12,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -176,7 +177,8 @@ type CreditsProvider interface {
 }
 
 // FormatRate 把上游各种原始倍率串（如 "x0.71 credits"、"x0.05"、"0.5"）
-// 归一化为统一的始终保留两位小数的 "0.50X" 样式；非数值文案（如 "免费"、"订阅"）原样保留。
+// 归一化为统一的始终保留两位小数的 "0.50X" 样式；非数值文案（如 "免费"、"订阅"）原样保留；
+// 负数与 NaN/Inf 视为「未知」返回空串（上游常用它们表示缺数据）。
 func FormatRate(raw string) string {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -188,7 +190,12 @@ func FormatRate(raw string) string {
 	clean = strings.TrimPrefix(clean, "x")
 	clean = strings.TrimSuffix(clean, "x")
 	clean = strings.TrimSpace(clean)
-	if num, err := strconv.ParseFloat(clean, 64); err == nil && num >= 0 {
+	if num, err := strconv.ParseFloat(clean, 64); err == nil {
+		// 负数倍率不存在；NaN/Inf 是上游把缺数据写成占位符，展示出来会变成
+		// 一个看得见的假倍率。这两种情况一律当「未知」。
+		if math.IsNaN(num) || math.IsInf(num, 0) || num < 0 {
+			return ""
+		}
 		return fmt.Sprintf("%.2fX", num)
 	}
 	return s

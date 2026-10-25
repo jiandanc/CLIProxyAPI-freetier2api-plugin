@@ -42,6 +42,7 @@ func testModels() []Model {
 		{Key: "kmodel_latest", DisplayName: "Kimi-K3"},
 		{Key: "kmodel", DisplayName: "Kimi-K2.8-Preview"},
 		{Key: "gmodel", DisplayName: "GLM-5.3"},
+		{Key: "free", DisplayName: "Free-Model", PriceFactor: float64Ptr(0)},
 		{Key: "gfmodel", DisplayName: "GLM-5.3-Flash"},
 		{Key: "dmodel", DisplayName: "DeepSeek-V4-Pro"},
 		{Key: "dfmodel", DisplayName: "DeepSeek-Flash"},
@@ -191,8 +192,9 @@ func TestModelsToPluginAPIUsesSlug(t *testing.T) {
 func TestModelCreditsFromPriceFactor(t *testing.T) {
 	instance := newInstance(core.Env{}, RegionCN).(*adapter)
 	models := []Model{
-		{Key: "dmodel", DisplayName: "DeepSeek-V4-Pro", PriceFactor: 0.42},
+		{Key: "dmodel", DisplayName: "DeepSeek-V4-Pro", PriceFactor: float64Ptr(0.42)},
 		{Key: "gmodel", DisplayName: "GLM-5.3"},
+		{Key: "free", DisplayName: "Free-Model", PriceFactor: float64Ptr(0)},
 	}
 	instance.modelsToPluginAPI(models)
 
@@ -200,7 +202,11 @@ func TestModelCreditsFromPriceFactor(t *testing.T) {
 	if got := credits["deepseek-v4-pro"]; got != "0.42X" {
 		t.Errorf("deepseek-v4-pro credits = %q; want 0.42X", got)
 	}
-	// price_factor 缺失（0）表示上游没给倍率，不能显示成 x0.00。
+	// 显式 0 是限免档，保留成 0.00X。
+	if got := credits["free-model"]; got != "0.00X" {
+		t.Errorf("显式 0 倍率 = %q; want 0.00X", got)
+	}
+	// price_factor 缺失表示上游没给倍率，不能显示成 x0.00。
 	if _, ok := credits["glm-5.3"]; ok {
 		t.Errorf("model without price_factor must have no credits entry, got %q", credits["glm-5.3"])
 	}
@@ -209,3 +215,6 @@ func TestModelCreditsFromPriceFactor(t *testing.T) {
 		t.Error("credits must be keyed by the registered slug, not the upstream key")
 	}
 }
+
+// float64Ptr 便于在测试里构造「上游显式给了倍率」的模型。
+func float64Ptr(value float64) *float64 { return &value }

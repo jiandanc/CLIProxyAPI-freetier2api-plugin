@@ -70,24 +70,25 @@ func TestVendorCapabilities(t *testing.T) {
 		merge     bool
 		configure bool
 		console   bool
+		credits   bool
 		authMode  string
 	}
 	cases := map[string]want{
-		"autoclawcn":        {refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true, authMode: "oauth"},
-		"autoclawglobal":    {login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true, authMode: "oauth"},
-		"cline":             {login: true, refresh: true, merge: true, configure: true, authMode: "oauth"},
+		"autoclawcn":        {credits: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true, authMode: "oauth"},
+		"autoclawglobal":    {credits: true, login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true, authMode: "oauth"},
+		"cline":             {credits: true, login: true, refresh: true, merge: true, configure: true, authMode: "oauth"},
 		"codearts":          {login: true, refresh: true, quota: true, checkin: true, models: true, merge: true},
 		"minimaxcodecn":     {login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
 		"minimaxcodeglobal": {login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
-		"opencodezen":       {refresh: true, models: true, merge: true, configure: true, authMode: "apikey"},
-		"qodercn":           {login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
-		"qoderglobal":       {login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
-		"raccoon":           {login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
-		"traecn":            {login: true, refresh: true, quota: true, checkin: true, merge: true, configure: true},
-		"traeglobal":        {login: true, refresh: true, quota: true, checkin: true, merge: true, configure: true},
-		"traesolo":          {login: true, refresh: true, quota: true, checkin: true, merge: true, configure: true},
-		"workbuddycn":       {login: true, refresh: true, quota: true, checkin: true, tasks: true, models: true, merge: true, configure: true, console: true},
-		"workbuddyglobal":   {login: true, refresh: true, quota: true, checkin: true, tasks: true, models: true, merge: true, configure: true, console: true},
+		"opencodezen":       {credits: true, refresh: true, models: true, merge: true, configure: true, authMode: "apikey"},
+		"qodercn":           {credits: true, login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
+		"qoderglobal":       {credits: true, login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
+		"raccoon":           {credits: true, login: true, refresh: true, quota: true, checkin: true, models: true, merge: true, configure: true},
+		"traecn":            {credits: true, login: true, refresh: true, quota: true, checkin: true, merge: true, configure: true},
+		"traeglobal":        {credits: true, login: true, refresh: true, quota: true, checkin: true, merge: true, configure: true},
+		"traesolo":          {credits: true, login: true, refresh: true, quota: true, checkin: true, merge: true, configure: true},
+		"workbuddycn":       {credits: true, login: true, refresh: true, quota: true, checkin: true, tasks: true, models: true, merge: true, configure: true, console: true},
+		"workbuddyglobal":   {credits: true, login: true, refresh: true, quota: true, checkin: true, tasks: true, models: true, merge: true, configure: true, console: true},
 		"zcode":             {login: true, refresh: true, quota: true, merge: true, configure: true, authMode: "oauth"},
 	}
 	for _, vendor := range testApp.Registry().Vendors() {
@@ -104,6 +105,7 @@ func TestVendorCapabilities(t *testing.T) {
 		_, hasMerge := core.As[core.StorageMerger](vendor)
 		_, hasConfigure := core.As[core.Configurable](vendor)
 		_, hasConsole := core.As[core.ConsoleModelProvider](vendor)
+		_, hasCredits := core.As[core.CreditsProvider](vendor)
 		authMode := ""
 		if reporter, okReporter := core.As[core.AuthModeReporter](vendor); okReporter {
 			authMode = reporter.AuthMode()
@@ -111,7 +113,7 @@ func TestVendorCapabilities(t *testing.T) {
 		got := want{
 			login: hasLogin, refresh: hasRefresh, quota: hasQuota, checkin: hasCheckin,
 			tasks: hasTasks, models: hasModels, merge: hasMerge, configure: hasConfigure,
-			console: hasConsole, authMode: authMode,
+			console: hasConsole, credits: hasCredits, authMode: authMode,
 		}
 		if got != expected {
 			t.Fatalf("vendor %s capabilities = %+v, want %+v", vendor.ID(), got, expected)

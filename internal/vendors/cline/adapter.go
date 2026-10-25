@@ -12,7 +12,6 @@ package cline
 import (
 	"context"
 	"strings"
-	"sync"
 	"time"
 
 	"freetier2api-plugin/cpasdk/pluginapi"
@@ -26,8 +25,7 @@ type adapter struct {
 	*core.NativeAdapter[*Credential]
 	baseURL string
 	// creditsMu 保护 credits：最近一次模型清单里的计费档。
-	creditsMu sync.RWMutex
-	credits   map[string]string
+	credits core.CreditTable
 }
 
 // pendingLogin 是一次进行中的 Cline 登录（会话数据）。
@@ -112,9 +110,7 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 			credits[model.ID] = label
 		}
 	}
-	v.creditsMu.Lock()
-	v.credits = credits
-	v.creditsMu.Unlock()
+	v.credits.Replace(credits)
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		id := strings.TrimSpace(model.ID)
 		if id == "" {
@@ -166,16 +162,7 @@ func describeModel(model Model) string {
 // 控制台的「费用倍率」列直接展示这个文案；免费/订阅是 Cline 能给出的
 // 最精确的成本信息（上游不提供数值倍率）。
 func (v *adapter) ModelCredits() map[string]string {
-	v.creditsMu.RLock()
-	defer v.creditsMu.RUnlock()
-	if len(v.credits) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(v.credits))
-	for id, value := range v.credits {
-		out[id] = value
-	}
-	return out
+	return v.credits.Snapshot()
 }
 
 // costLabel 把计费档转成展示文案；未知档返回空串。

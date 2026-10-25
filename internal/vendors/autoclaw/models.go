@@ -168,8 +168,9 @@ func fetchModelConfig(ctx context.Context, baseURL, token string) ([]Model, erro
 
 // levelText 把上游的计费档位解成展示文案。
 //
-// 实测是字符串（「低」/「中」/「高」）；数字档位原样转成十进制文本。
-// 对象等未知形态返回空串：宁可显示「—」，也不把结构体塞进倍率列。
+// 实测是字符串（「低」/「中」/「高」）；数字是**档位编号**而不是倍率，
+// 必须带上「档位」前缀，否则 core.FormatRate 会把 3 归一化成 "3.00X"，
+// 在控制台变成一个看得见的伪倍率。对象等未知形态返回空串：宁可显示「—」。
 func levelText(raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return ""
@@ -180,7 +181,7 @@ func levelText(raw json.RawMessage) string {
 	}
 	var number json.Number
 	if errNumber := json.Unmarshal(raw, &number); errNumber == nil {
-		return number.String()
+		return "档位 " + number.String()
 	}
 	return ""
 }

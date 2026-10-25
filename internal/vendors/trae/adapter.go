@@ -28,8 +28,7 @@ type adapter struct {
 	// catalog 是模型目录缓存（按账号），随实例隔离。
 	catalog catalogCache
 	// credits 缓存最近一轮目录探测的倍率表（官方模型 ID → 展示文案）。
-	creditsMu sync.RWMutex
-	credits   map[string]string
+	credits core.CreditTable
 }
 
 // profile 返回当前 profile 快照（编译期 profile + 运行期版本覆盖）。
@@ -164,9 +163,7 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 			credits[model.ID] = label
 		}
 	}
-	v.creditsMu.Lock()
-	v.credits = credits
-	v.creditsMu.Unlock()
+	v.credits.Replace(credits)
 	return core.ConvertModels(models, func(model Model) (core.ModelDescriptor, bool) {
 		if strings.TrimSpace(model.ID) == "" {
 			return core.ModelDescriptor{}, false
@@ -185,16 +182,7 @@ func (v *adapter) modelsToPluginAPI(models []Model) []pluginapi.ModelInfo {
 
 // ModelCredits 实现 core.CreditsProvider：返回「官方模型 ID → 计费倍率」。
 func (v *adapter) ModelCredits() map[string]string {
-	v.creditsMu.RLock()
-	defer v.creditsMu.RUnlock()
-	if len(v.credits) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(v.credits))
-	for id, value := range v.credits {
-		out[id] = value
-	}
-	return out
+	return v.credits.Snapshot()
 }
 
 // ---- 执行 ----

@@ -89,6 +89,47 @@ func (c *catalogCache) resolve(ctx context.Context, model string, cfg Config, cr
 //
 // 缓存键带上 function 与构建号：目录内容由这两者共同决定，只按账号缓存会在
 // 版本号被配置改写后继续命中旧清单（最长 catalogTTL）。
+// catalogEntries 把原始条目筛成「可选对话模型」与展示元数据。
+//
+// 单独成函数是为了能在测试里直接喂两代键名的响应，不必起 HTTP 服务。
+func catalogEntries(items []catalogItem) (map[string]ResolvedModel, map[string]Model) {
+	models := make(map[string]ResolvedModel, len(items))
+	metadata := make(map[string]Model, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item.ConfigName)
+		if name == "" || !item.ConfigSwitch {
+			continue
+		}
+		// usage=custom_model/summary 的条目是路由配置或内部摘要，不是可选对话模型。
+		if usage := strings.ToLower(strings.TrimSpace(item.Usage)); usage != "" && usage != "chat_completion" {
+			continue
+		}
+		if item.CustomModels != nil {
+			continue
+		}
+		wire, maxTokens := selectWireModel(item.ModelDetailList)
+		if wire == "" {
+			continue
+		}
+		display := strings.TrimSpace(item.DisplayConfig.DisplayName)
+		if display == "" {
+			display = name
+		}
+		models[strings.ToLower(name)] = ResolvedModel{ConfigName: name, WireName: wire}
+		metadata[name] = Model{
+			ID:            name,
+			Name:          display,
+			Description:   "Trae 上游模型",
+			ContextWindow: item.ContextWindow.Dev,
+			MaxTokens:     maxTokens,
+			SupportsTools: strings.Contains(item.ExtraConfig, `"native_function_call":true`),
+			IsReasoning:   item.DisplayConfig.ModelCapability == "reasoning_model",
+			Credits:       consumptionRate(item.DisplayContactConfig),
+		}
+	}
+	return models, metadata
+}
+
 func (c *catalogCache) load(ctx context.Context, cred *Credential, cfg Config) (catalogEntry, bool) {
 	key := strings.Join([]string{cfg.VendorID, cred.UID, cfg.Function, cfg.IDEVersionCode}, "|")
 	var (
@@ -150,6 +191,33 @@ type catalogItem struct {
 	// （display_contact_config / displayContactConfig，内部还有 camelCase
 	// 与 snake_case 两态），因此整段收下再按键名不区分大小写地取。
 	DisplayContactConfig json.RawMessage `json:"display_contact_config"`
+}
+
+// UnmarshalJSON 兼容外层键名的两种写法。
+//
+// 旧版是 snake_case，新版外层换成了 camelCase（displayContactConfig、
+// extraConfig）。只认一种就会让整条倍率/工具能力静默变成「未知」。
+func (item *catalogItem) UnmarshalJSON(data []byte) error {
+	type alias catalogItem
+	var aux struct {
+		*alias
+		DisplayContactConfigCamel json.RawMessage `json:"displayContactConfig"`
+		ExtraConfigCamel          json.RawMessage `json:"extraConfig"`
+	}
+	aux.alias = (*alias)(item)
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if len(item.DisplayContactConfig) == 0 {
+		item.DisplayContactConfig = aux.DisplayContactConfigCamel
+	}
+	if item.ExtraConfig == "" && len(aux.ExtraConfigCamel) > 0 {
+		var text string
+		if err := json.Unmarshal(aux.ExtraConfigCamel, &text); err == nil {
+			item.ExtraConfig = text
+		}
+	}
+	return nil
 }
 
 type catalogDetail struct {
@@ -249,43 +317,8 @@ func fetchCatalog(ctx context.Context, cred *Credential, cfg Config) (catalogEnt
 		return catalogEntry{}, false
 	}
 
-	entry := catalogEntry{
-		models:    map[string]ResolvedModel{},
-		metadata:  map[string]Model{},
-		fetchedAt: time.Now(),
-	}
-	for _, item := range parsed.ConfigInfoList {
-		name := strings.TrimSpace(item.ConfigName)
-		if name == "" || !item.ConfigSwitch {
-			continue
-		}
-		// usage=custom_model/summary 的条目是路由配置或内部摘要，不是可选对话模型。
-		if usage := strings.ToLower(strings.TrimSpace(item.Usage)); usage != "" && usage != "chat_completion" {
-			continue
-		}
-		if item.CustomModels != nil {
-			continue
-		}
-		wire, maxTokens := selectWireModel(item.ModelDetailList)
-		if wire == "" {
-			continue
-		}
-		display := strings.TrimSpace(item.DisplayConfig.DisplayName)
-		if display == "" {
-			display = name
-		}
-		entry.models[strings.ToLower(name)] = ResolvedModel{ConfigName: name, WireName: wire}
-		entry.metadata[name] = Model{
-			ID:            name,
-			Name:          display,
-			Description:   "Trae 上游模型",
-			ContextWindow: item.ContextWindow.Dev,
-			MaxTokens:     maxTokens,
-			SupportsTools: strings.Contains(item.ExtraConfig, `"native_function_call":true`),
-			IsReasoning:   item.DisplayConfig.ModelCapability == "reasoning_model",
-			Credits:       consumptionRate(item.DisplayContactConfig),
-		}
-	}
+	models, metadata := catalogEntries(parsed.ConfigInfoList)
+	entry := catalogEntry{models: models, metadata: metadata, fetchedAt: time.Now()}
 	if len(entry.models) == 0 {
 		// 上游偶尔会整体降级（例如构建号低于门控时只回旧清单）。把条目摘要
 		// 打出来，才能区分「目录结构变了」和「版本号被降级」。

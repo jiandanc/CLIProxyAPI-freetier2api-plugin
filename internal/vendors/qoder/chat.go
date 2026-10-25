@@ -1306,6 +1306,15 @@ func FloatVal(m map[string]interface{}, key string) float64 {
 	return v
 }
 
+// FloatPtr 取可选数值：缺字段返回 nil，显式 0 返回指向 0 的指针。
+func FloatPtr(m map[string]interface{}, key string) *float64 {
+	v, ok := m[key].(float64)
+	if !ok {
+		return nil
+	}
+	return &v
+}
+
 const (
 	AppCode   = "cosy"
 	SecretB64 = "d2FyLCB3YXIgbmV2ZXIgY2hhbmdlcw==" // base64("war, war never changes")
@@ -1466,15 +1475,16 @@ type Bridge struct {
 
 // Model 是返回给前端的精简模型条目（仅保留下拉选择必要字段）
 type Model struct {
-	Key             string  `json:"key"`
-	DisplayName     string  `json:"display_name"`
-	Enable          bool    `json:"enable"`
-	IsDefault       bool    `json:"is_default"`
-	IsReasoning     bool    `json:"is_reasoning,omitempty"`
-	ContextWindow   int     `json:"context_window,omitempty"`
-	MaxOutputTokens int     `json:"max_output_tokens,omitempty"`
-	MaxInputTokens  int     `json:"max_input_tokens,omitempty"`
-	PriceFactor     float64 `json:"price_factor,omitempty"`
+	Key             string `json:"key"`
+	DisplayName     string `json:"display_name"`
+	Enable          bool   `json:"enable"`
+	IsDefault       bool   `json:"is_default"`
+	IsReasoning     bool   `json:"is_reasoning,omitempty"`
+	ContextWindow   int    `json:"context_window,omitempty"`
+	MaxOutputTokens int    `json:"max_output_tokens,omitempty"`
+	MaxInputTokens  int    `json:"max_input_tokens,omitempty"`
+	// PriceFactor 是上游计费倍率；用指针区分「没给」与「显式 0」（限免）。
+	PriceFactor *float64 `json:"price_factor,omitempty"`
 }
 
 // NewBridge 创建 API 转换桥接。
@@ -1599,7 +1609,7 @@ func extractModels(rawList []interface{}) []Model {
 			IsDefault:      func() bool { v, _ := m["is_default"].(bool); return v }(),
 			IsReasoning:    func() bool { v, _ := m["is_reasoning"].(bool); return v }(),
 			MaxInputTokens: int(FloatVal(m, "max_input_tokens")),
-			PriceFactor:    FloatVal(m, "price_factor"),
+			PriceFactor:    FloatPtr(m, "price_factor"),
 		}
 		if cc, ok := m["context_config"].(map[string]interface{}); ok {
 			var defaultCfg map[string]interface{}
