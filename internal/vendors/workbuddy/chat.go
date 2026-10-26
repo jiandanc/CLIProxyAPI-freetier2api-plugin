@@ -16,6 +16,7 @@ import (
 
 	"freetier2api-plugin/internal/core"
 	"freetier2api-plugin/internal/hostbridge"
+	"freetier2api-plugin/internal/logger"
 
 	_ "embed"
 	"regexp"
@@ -215,6 +216,13 @@ func enrichClassifyError(status int, body string, header http.Header) *core.Fail
 	classified := Classify(status, body)
 	classified.RetryAfter = ParseRetryAfter(header, time.Now())
 	classified.ResetAt = ParseRateReset(body)
+	if classified.Kind == core.FailureKindChannelRejected {
+		// 渠道校验是上游新增的策略拦截，插件侧没有（也不该有）伪造官方客户端证明的手段。
+		// 返回给用户的消息已折叠成人话，日志里保留全量正文：requestId 是反馈上游、
+		// 以及日后比对协议差异时唯一的证据，折叠后就只剩这一份。
+		logger.Error("upstream channel verification rejected the request (status=%d): %s",
+			status, core.Truncate(body, 1024))
+	}
 	return classified
 }
 

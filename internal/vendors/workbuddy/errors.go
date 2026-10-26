@@ -112,10 +112,11 @@ func Classify(status int, body string) *core.Failure {
 	}
 	// 渠道校验失败（11128）：上游常把它包在 HTTP 500 里返回，但它是请求级拒绝。
 	// 按 5xx 处理会让宿主把全部账号当服务端故障冷却，后续重试退化成
-	// 503 auth_unavailable（只剩数字码，可读说明丢失）。这里改写成 400 并保留原文。
+	// 503 auth_unavailable（只剩数字码，可读说明丢失）。这里改写成 400，
+	// 并把多语言正文折叠成一条可读消息（原文由调用方写进日志留证）。
 	if codeMarker(lower, channelRejectedCode) || core.ContainsAny(lower, channelRejectedMarkers) {
 		return &core.Failure{Kind: core.FailureKindChannelRejected, Status: http.StatusBadRequest,
-			Code: channelRejectedCode, Msg: body}
+			Code: channelRejectedCode, Msg: channelRejectedMessage(body)}
 	}
 	// 1) 余额耗尽（明确的 402）。
 	if status == http.StatusPaymentRequired {
@@ -224,6 +225,54 @@ func objectHasModelBlock(fields map[string]any) bool {
 		}
 	}
 	return false
+}
+
+// channelRejectedMessage 把 11128 的正文折叠成一条可读、可反馈的错误消息。
+//
+// 为什么要折叠：上游正文同时带 msg / displayMsg / displayTips 的中英繁体三份文案，
+// 原样透传会把「为什么被拦、找谁对齐」淹在 JSON 里，用户看到的只是一坨 500。
+// 折叠后只留三段：上游英文 msg（可搜索）、面向用户的中文提示、requestId。
+func channelRejectedMessage(body string) string {
+	var payload struct {
+		Msg         string            `json:"msg"`
+		RequestID   string            `json:"requestId"`
+		DisplayMsg  map[string]string `json:"displayMsg"`
+		DisplayTips map[string]string `json:"displayTips"`
+	}
+	text := ""
+	if errUnmarshal := json.Unmarshal([]byte(body), &payload); errUnmarshal == nil {
+		text = strings.TrimSpace(payload.Msg)
+		if hint := localizedText(payload.DisplayTips, payload.DisplayMsg); hint != "" {
+			if text != "" {
+				text += " — "
+			}
+			text += hint
+		}
+	}
+	if text == "" {
+		// 正文不是可解析的业务信封（HTML 拦截页等）：透传截断后的原文，不吞证据。
+		text = core.Truncate(body, 512)
+	}
+	if text == "" {
+		text = "channel verification failed"
+	}
+	trace := "code=" + channelRejectedCode
+	if requestID := strings.TrimSpace(payload.RequestID); requestID != "" {
+		trace += " requestId=" + requestID
+	}
+	return text + " (" + trace + ")"
+}
+
+// localizedText 按「中文 > 英文 > 繁体」取第一条非空文案；tips 优先于 msg。
+func localizedText(tips, msg map[string]string) string {
+	for _, source := range []map[string]string{tips, msg} {
+		for _, key := range []string{"zh", "en", "zh-hant"} {
+			if text := strings.TrimSpace(source[key]); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
 }
 
 // IsWAFBlocked 判断是否为 WAF 拦截。

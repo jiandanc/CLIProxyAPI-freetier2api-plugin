@@ -180,7 +180,7 @@ func doLoginRequest(req *http.Request) (json.RawMessage, error) {
 		return nil, fmt.Errorf("read login response: %w", errRead)
 	}
 	if resp.StatusCode >= 400 {
-		return nil, Classify(resp.StatusCode, string(body))
+		return nil, enrichClassifyError(resp.StatusCode, string(body), resp.Header)
 	}
 	var envelope struct {
 		Code int             `json:"code"`

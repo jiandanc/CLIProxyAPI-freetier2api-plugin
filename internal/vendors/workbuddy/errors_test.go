@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"freetier2api-plugin/internal/core"
+	"freetier2api-plugin/internal/logger"
 )
 
 func TestClassifyOrderingMatters(t *testing.T) {
@@ -176,5 +177,69 @@ func TestChannelRejectedKeepsReadableDetail(t *testing.T) {
 		if !strings.Contains(pluginErr.Message, want) {
 			t.Fatalf("message %q must contain %q", pluginErr.Message, want)
 		}
+	}
+}
+
+// channelRejectedBody 是 Issue #42 的原始 11128 正文：上游新增渠道校验后的真实回包。
+const channelRejectedBody = `{"code":11128,"msg":"Illegal API invocation from an unapproved channel",` +
+	`"requestId":"01a176819f987048670eda9f9a912d5",` +
+	`"displayMsg":{"en":"Request blocked. Please send it again","zh":"请求被拦截，请重新发送"},` +
+	`"displayTips":{"en":"This call failed channel verification, possibly because it was not sent from an official client. Please resend from the official client.",` +
+	`"zh":"这次调用没通过渠道校验，可能不是官方客户端发出的。请用官方版本重新发送。",` +
+	`"zh-hant":"本次呼叫未通過通路驗證。"},` +
+	`"actions":["EDIT_INPUT","SUBMIT_FEEDBACK"]}`
+
+// TestChannelRejectedMessageFoldsMultilingualBody 验证 11128 折叠后的消息仍然可读、可反馈。
+//
+// 上游正文是 en/zh/zh-hant 三份文案的 JSON，直接透传只会让用户看到一坨 500；
+// 折叠后必须仍保留上游 msg、中文提示与 requestId（反馈上游时唯一能对齐的凭据）。
+func TestChannelRejectedMessageFoldsMultilingualBody(t *testing.T) {
+	failure := Classify(http.StatusInternalServerError, channelRejectedBody)
+	if failure.Kind != core.FailureKindChannelRejected || failure.Status != http.StatusBadRequest {
+		t.Fatalf("kind=%s status=%d, want channel_rejected/400", failure.Kind, failure.Status)
+	}
+	if failure.Retryable() {
+		t.Fatal("channel rejection must not be retryable: 换号同样过不了渠道校验")
+	}
+	for _, want := range []string{
+		"Illegal API invocation from an unapproved channel",
+		"这次调用没通过渠道校验",
+		"code=11128",
+		"requestId=01a176819f987048670eda9f9a912d5",
+	} {
+		if !strings.Contains(failure.Msg, want) {
+			t.Fatalf("message %q must contain %q", failure.Msg, want)
+		}
+	}
+	if strings.Contains(failure.Msg, "displayTips") {
+		t.Fatalf("message must not dump the raw envelope: %q", failure.Msg)
+	}
+}
+
+// TestChannelRejectedKeepsRawBodyInLog 验证拦截证据进日志。
+//
+// 消息折叠后正文不再随错误返回；日志必须留全量原文（含 requestId），
+// 否则 Issue #42 截图里的信息在排障时会彻底丢失。
+func TestChannelRejectedKeepsRawBodyInLog(t *testing.T) {
+	_, since := logger.Snapshot(0, 1)
+	enrichClassifyError(http.StatusInternalServerError, channelRejectedBody, http.Header{})
+	entries, _ := logger.Snapshot(since, 200)
+	for _, entry := range entries {
+		if strings.Contains(entry.Message, "channel verification") &&
+			strings.Contains(entry.Message, "01a176819f987048670eda9f9a912d5") {
+			return
+		}
+	}
+	t.Fatalf("channel rejection must be logged with the upstream requestId, got %d entries", len(entries))
+}
+
+// TestChannelRejectedFallsBackToRawBody 验证非 JSON 正文不会被折叠吞掉。
+func TestChannelRejectedFallsBackToRawBody(t *testing.T) {
+	failure := Classify(http.StatusForbidden, "Illegal API invocation from an unapproved channel")
+	if failure.Kind != core.FailureKindChannelRejected {
+		t.Fatalf("kind=%s, want channel_rejected", failure.Kind)
+	}
+	if !strings.Contains(failure.Msg, "Illegal API invocation from an unapproved channel") {
+		t.Fatalf("message %q must keep the raw body", failure.Msg)
 	}
 }
