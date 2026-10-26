@@ -1,0 +1,23 @@
+internal/vendors/opencodezen/models_test.go
+  s_bda6f659675168::t_26a9e158280ac1 127,130,140-141
+  s_bda6f659675168::t_4bf789a40166cf 155,159-160
+internal/vendors/opencodezen/models.go
+  s_bda6f659675168::t_d12d47098c2b42 363-364,366
+  s_bda6f659675168::t_718be2120f3643 55-56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "da862d2c7d8372b929b2faf8ab2de81d7d64ba9f",
+  "prompts": {},
+  "sessions": {
+    "s_bda6f659675168": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "588ecaab-2303-4465-a119-856b70067326",
+        "model": "sn-deepseek-v4-1-flash-1017"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
