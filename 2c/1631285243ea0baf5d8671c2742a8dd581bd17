@@ -1,0 +1,50 @@
+internal/vendors/opencodezen/chat.go
+  s_bc8f4803ab0ba0::t_17e24b63210c79 125-126,137-149,151-161,163
+  s_bc8f4803ab0ba0::t_cbffd6506d5c25 610,621-631
+  s_bc8f4803ab0ba0::t_6a7e80e4c94a85 103
+  s_bc8f4803ab0ba0::t_7ccc1273764a63 84
+  s_bc8f4803ab0ba0::t_98045830aefb36 117-119,122,129,166-171
+  s_bc8f4803ab0ba0::t_30eedc7f810f81 44-46,52
+  s_bc8f4803ab0ba0::t_0faa415df9f552 183-200,204,206-213,216-221
+  s_bc8f4803ab0ba0::t_46a291138041b1 571-574,577,581-582,585-587
+internal/vendors/opencodezen/adapter.go
+  s_bc8f4803ab0ba0::t_fecdc1495a6520 121-125
+  s_bc8f4803ab0ba0::t_b404cee093fe3c 185-188,209-212,221-231
+  s_bc8f4803ab0ba0::t_c6f67bf069f286 91,93-97
+internal/vendors/opencodezen/chat_test.go
+  s_bc8f4803ab0ba0::t_ca6f0984a8b209 121-124,126-128,130-141,145-149,151,158,170-174,176-182,188-202,207-209,211,226-233,235-236,238-248
+  s_bc8f4803ab0ba0::t_dfb25e739945b0 183-185
+tests/integration/management_resilience_test.go
+  s_bc8f4803ab0ba0::t_f9da6ae15833cc 234,341,417
+README.md
+  s_bc8f4803ab0ba0::t_9e2e4f0b1d3e46 45
+README_EN.md
+  s_bc8f4803ab0ba0::t_9e2e4f0b1d3e46 45
+internal/vendors/opencodezen/models_test.go
+  s_bc8f4803ab0ba0::t_ad10d44b09c831 176-182,184,186-213
+  s_bc8f4803ab0ba0::t_9551914400c61a 151-175
+  s_bc8f4803ab0ba0::t_279d5b2586fb99 183,185
+internal/app/app.go
+  s_bc8f4803ab0ba0::t_c44d085028539a 22
+internal/vendors/opencodezen/models.go
+  s_bc8f4803ab0ba0::t_cd6be526942c48 330-351
+  s_bc8f4803ab0ba0::t_3d9262aacf7e58 92
+  s_bc8f4803ab0ba0::t_ac052174b89811 65
+  s_bc8f4803ab0ba0::t_38f3ce6e0d7c74 93-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "2c1631285243ea0baf5d8671c2742a8dd581bd17",
+  "prompts": {},
+  "sessions": {
+    "s_bc8f4803ab0ba0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a03e84c-9b3d-4269-ade0-3c3c04992152",
+        "model": "sn-deepseek-v4-1-flash-1017"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
