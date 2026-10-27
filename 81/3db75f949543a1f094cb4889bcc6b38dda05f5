@@ -1,0 +1,28 @@
+internal/vendors/zcode/chat_test.go
+  s_63fc31ed84643e::t_38b099f3ff49d4 241-242,267-268
+  s_63fc31ed84643e::t_f2b6115e0db829 779-780,782,784
+  s_63fc31ed84643e::t_91425c5d39839a 701-719
+  s_63fc31ed84643e::t_6fce608ff045d6 586,599,618,631,649,657,684
+internal/vendors/zcode/chat.go
+  s_63fc31ed84643e::t_b4cfebe4fa8ac5 103-105,108
+  s_63fc31ed84643e::t_24dca31341af12 106-107
+tests/integration/zcode_usage_test.go
+  s_63fc31ed84643e::t_7b9265db3cbcda 51-70,73
+  s_63fc31ed84643e::t_6a8423e51f4e98 34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "813db75f949543a1f094cb4889bcc6b38dda05f5",
+  "prompts": {},
+  "sessions": {
+    "s_63fc31ed84643e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f78069c8-f040-4c28-a17a-64f95e1254b5",
+        "model": "sn-deepseek-v4-1-flash-1017"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
