@@ -1,0 +1,30 @@
+README.md
+  s_84cb73aad78a28::t_7eefd8bd6b4cf6 123,127
+internal/admin/console.html
+  s_84cb73aad78a28::t_27e66b0eee9dad 1010-1013,1019-1021
+  s_84cb73aad78a28::t_c5dd75da345388 1126
+  s_84cb73aad78a28::t_19b906fba0f5fc 1236-1237
+  s_84cb73aad78a28::t_4c4c3166f27abc 311
+  s_84cb73aad78a28::t_7345012a180d3e 2908-2911
+  s_84cb73aad78a28::t_81dc864e8b9eb9 1061-1077,1082-1094,1100-1104,1106
+README_EN.md
+  s_84cb73aad78a28::t_69430c29190928 123,127
+internal/admin/console_test.go
+  s_84cb73aad78a28::t_98a3e3663f7635 618-619
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "29b081d3e162f5e7ac1f313adc40e7f55f18974e",
+  "prompts": {},
+  "sessions": {
+    "s_84cb73aad78a28": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a8b3ddf8-6b47-435f-b7d7-9fc4ff0fb17d",
+        "model": "sn-deepseek-v4-1-flash-1017"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
