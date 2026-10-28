@@ -1,0 +1,51 @@
+internal/vendors/trae/credential.go
+  s_84cb73aad78a28::t_21262f438a9a7a 102,105,143
+internal/admin/catalog_test.go
+  s_84cb73aad78a28::t_21262f438a9a7a 59,277-297
+README_EN.md
+  s_84cb73aad78a28::t_d1482a31e9bd19 18
+internal/admin/catalog.go
+  s_84cb73aad78a28::t_21262f438a9a7a 553-556,564-566
+internal/vendors/codearts/credential_test.go
+  s_84cb73aad78a28::t_21262f438a9a7a 35
+internal/vendors/trae/chat_test.go
+  s_84cb73aad78a28::t_21262f438a9a7a 318-320,325-327,539-541,578-580
+internal/app/app.go
+  s_84cb73aad78a28::t_21262f438a9a7a 22
+README.md
+  s_84cb73aad78a28::t_f31ff25b92e1f6 18
+internal/vendors/trae/adapter.go
+  s_84cb73aad78a28::t_21262f438a9a7a 3,5,22-23,79
+internal/vendors/trae/chat.go
+  s_84cb73aad78a28::t_21262f438a9a7a 3,7,48,61-62,64,95-96,137,153,155,160
+internal/vendors/trae/login.go
+  s_84cb73aad78a28::t_21262f438a9a7a 129,132,454,492,508,596,768-769
+tests/integration/vendor_compat_test.go
+  s_84cb73aad78a28::t_21262f438a9a7a 14
+tests/integration/auth_test.go
+  s_84cb73aad78a28::t_21262f438a9a7a 24-25,92
+registry.json
+  s_84cb73aad78a28::t_21262f438a9a7a 7
+internal/vendors/trae/tasks.go
+  s_84cb73aad78a28::t_21262f438a9a7a 5,11,274-275
+internal/vendors/trae/credential_test.go
+  s_84cb73aad78a28::t_21262f438a9a7a 62-67,73-74,78-79,85,90,97
+tests/live/trae_live_test.go
+  s_84cb73aad78a28::t_21262f438a9a7a 140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "6209726980d6b9fe770f5d878235df300e6ad7c2",
+  "prompts": {},
+  "sessions": {
+    "s_84cb73aad78a28": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a8b3ddf8-6b47-435f-b7d7-9fc4ff0fb17d",
+        "model": "sn-deepseek-v4-1-flash-1017"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
