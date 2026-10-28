@@ -1,0 +1,86 @@
+internal/admin/tasks.go
+  s_84cb73aad78a28::t_b5a00a436f64a2 55-59,62
+tests/integration/account_alias_test.go
+  s_84cb73aad78a28::t_98b6d1c6817117 18-21,98-112
+internal/admin/console_test.go
+  s_84cb73aad78a28::t_fcd86729584ac8 587-627
+internal/admin/console.html
+  s_84cb73aad78a28::t_c7271981d65f00 787
+  s_84cb73aad78a28::t_fcc8606f60a254 785
+  s_84cb73aad78a28::t_2d82d8bfbddfe1 1084,1092-1094
+  s_84cb73aad78a28::t_51a6f1a441dc1f 302-305,310-313
+  s_84cb73aad78a28::t_357e608951e3d4 1276
+  s_84cb73aad78a28::t_b8a167c39fa507 1062-1063
+  s_84cb73aad78a28::t_34ecfc72817b3d 903-905,908-911,913-914,916,918-919,926,932-934,936,942,947-948
+  s_84cb73aad78a28::t_16a178238d7183 2796,2798-2799
+  s_84cb73aad78a28::t_9bfba206163a44 1279,1284-1286,1289,1299,1302-1307,1310,1315-1331
+  s_84cb73aad78a28::t_91b77f09edb326 786,788-790
+  s_84cb73aad78a28::t_5444a3598b08ea 992-1006,1009-1018
+  s_84cb73aad78a28::t_f3110a43f20bc2 906-907,912,915,917
+  s_84cb73aad78a28::t_63c05f184b828e 1201-1209
+  s_84cb73aad78a28::t_3144eae331d8ab 2924
+  s_84cb73aad78a28::t_c991ca495f39cf 2948
+  s_84cb73aad78a28::t_606859cc37d8f3 692-694
+  s_84cb73aad78a28::t_ecbfb628a838a1 746
+  s_84cb73aad78a28::t_cf53c8175c0649 2888,2893-2895,2903
+  s_84cb73aad78a28::t_726bebd106c427 2815-2820
+  s_84cb73aad78a28::t_9e12010dd4974c 960-991,1007-1008,1019-1020
+  s_84cb73aad78a28::t_f46f7463e10c23 1293,1298,1308-1309,1313-1314
+  s_84cb73aad78a28::t_3d2310957d65e3 1336,1345-1347
+  s_84cb73aad78a28::t_30a04443291744 935,944,954
+  s_84cb73aad78a28::t_fb449fcb957f25 739
+internal/admin/keepalive.go
+  s_84cb73aad78a28::t_b681e2a27613b8 19-23,27
+internal/admin/accounts_enabled_test.go
+  s_84cb73aad78a28::t_a74330fcff9857 45-47,50,52-54
+  s_84cb73aad78a28::t_8922798dbe0756 1-44,48-49,51,55-79
+internal/tasks/engine.go
+  s_84cb73aad78a28::t_6d1025a719d462 367,492,695
+  s_84cb73aad78a28::t_f387cdcd4d2a11 226,268,662-663,665,679
+  s_84cb73aad78a28::t_c211a7e041132b 166-168,171
+internal/admin/admin.go
+  s_84cb73aad78a28::t_bc2d1254c80220 106
+  s_84cb73aad78a28::t_0e02099812116a 179-181
+internal/tasks/api.go
+  s_84cb73aad78a28::t_435a97fab93e07 116-118
+internal/admin/accounts_delete_test.go
+  s_84cb73aad78a28::t_fce0e8e42efb77 72,80,91,101,117,125,134,147
+tests/integration/account_enabled_test.go
+  s_84cb73aad78a28::t_f3bdfc8c6c3927 30-31,33,45,71,108,125,146,149
+  s_84cb73aad78a28::t_3993a78a14f5f0 1-29,32,34-44,46-70,72-107,109-124,126-145,147-148,150-152
+internal/admin/accounts.go
+  s_84cb73aad78a28::t_ef541ad8d6011c 290-294
+  s_84cb73aad78a28::t_fce0e8e42efb77 365,386
+  s_84cb73aad78a28::t_c7fe9c60d16a37 376-385,387-400
+  s_84cb73aad78a28::t_c4d66decc830e4 148,154-155
+  s_84cb73aad78a28::t_b0a732596a17c2 67-71
+  s_84cb73aad78a28::t_2f2cda188573c7 246-289,295-318,335,339
+README.md
+  s_84cb73aad78a28::t_6ebbcf920d5c82 20,117,121-128
+tests/testhost/host.go
+  s_84cb73aad78a28::t_280b920970a5a5 296-336
+  s_84cb73aad78a28::t_db08df47833598 91-92
+internal/admin/authfile.go
+  s_84cb73aad78a28::t_efe1f90c0b9218 12
+  s_84cb73aad78a28::t_0ab6bfd639843e 3-5,8-9
+  s_84cb73aad78a28::t_222467860ac9eb 126-150
+  s_84cb73aad78a28::t_22ff6e751ab32d 59-60,71,75
+README_EN.md
+  s_84cb73aad78a28::t_6ebbcf920d5c82 20,117,121-128
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.51-trip",
+  "base_commit_sha": "d715a08eb50e7f3c5ad1dc2ba43ad208afc9f970",
+  "prompts": {},
+  "sessions": {
+    "s_84cb73aad78a28": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a8b3ddf8-6b47-435f-b7d7-9fc4ff0fb17d",
+        "model": "sn-deepseek-v4-1-flash-1017"
+      },
+      "human_author": "jiandanc <jiandanc@126.com>"
+    }
+  }
+}
