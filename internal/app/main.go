@@ -41,7 +41,8 @@ type registration struct {
 }
 
 type registrationCapabilities struct {
-	ResponseBeforeTranslator bool `json:"response_before_translator"`
+	ResponseBeforeTranslator                  bool `json:"response_before_translator"`
+	ResponseBeforeTranslatorOmitRequestBodies bool `json:"response_before_translator_omit_request_bodies,omitempty"`
 
 	ModelProvider         bool     `json:"model_provider"`
 	AuthProvider          bool     `json:"auth_provider"`
@@ -122,7 +123,8 @@ func (a *App) handlePluginRegister(request []byte) ([]byte, error) {
 	a.lifecycleMu.Lock()
 	defer a.lifecycleMu.Unlock()
 
-	cfg, errConfig := a.decodeConfig(configYAMLFrom(request))
+	lifecycle := lifecycleRequestFrom(request)
+	cfg, errConfig := a.decodeConfig(lifecycle.ConfigYAML)
 	if errConfig != nil {
 		return nil, fmt.Errorf("plugin.register: %w", errConfig)
 	}
@@ -133,6 +135,7 @@ func (a *App) handlePluginRegister(request []byte) ([]byte, error) {
 		logger.Error("load state failed: %v", errState)
 	}
 	a.applyModelCatalog(cfg)
+	a.hostSchemaVersion.Store(lifecycle.SchemaVersion)
 	if !a.registered {
 		a.registered = true
 		a.StartBackgroundWork()
@@ -145,7 +148,8 @@ func (a *App) handlePluginReconfigure(request []byte) ([]byte, error) {
 	a.lifecycleMu.Lock()
 	defer a.lifecycleMu.Unlock()
 
-	cfg, errConfig := a.decodeConfig(configYAMLFrom(request))
+	lifecycle := lifecycleRequestFrom(request)
+	cfg, errConfig := a.decodeConfig(lifecycle.ConfigYAML)
 	if errConfig != nil {
 		return nil, fmt.Errorf("plugin.reconfigure: %w", errConfig)
 	}
@@ -159,25 +163,34 @@ func (a *App) handlePluginReconfigure(request []byte) ([]byte, error) {
 		}
 	}
 	a.applyModelCatalog(cfg)
+	if lifecycle.SchemaVersion != 0 {
+		a.hostSchemaVersion.Store(lifecycle.SchemaVersion)
+	}
 	logger.Info("reconfigured: realms=%v state_dir=%s", cfg.EnabledRealms, cfg.StateDir)
 	return core.OKEnvelope(a.Registration())
 }
 
-func configYAMLFrom(raw []byte) []byte {
-	if len(raw) == 0 {
-		return nil
-	}
+func lifecycleRequestFrom(raw []byte) lifecycleRequest {
 	var req lifecycleRequest
-	if errUnmarshal := json.Unmarshal(raw, &req); errUnmarshal != nil {
-		return nil
+	if len(raw) != 0 {
+		_ = json.Unmarshal(raw, &req)
 	}
-	return req.ConfigYAML
+	return req
 }
+
+// schemaVersionResponseBeforeOmitRequestBodies is negotiated with the host;
+// legacy hosts continue to receive the schema-6 contract.
+const schemaVersionResponseBeforeOmitRequestBodies = pluginabi.SchemaVersionResponseBeforeOmitRequestBodies
 
 // Registration 构造注册响应。
 func (a *App) Registration() registration {
+	omitRequestBodies := a.hostSchemaVersion.Load() >= schemaVersionResponseBeforeOmitRequestBodies
+	schemaVersion := pluginabi.SchemaVersionRawManagementResponse
+	if omitRequestBodies {
+		schemaVersion = schemaVersionResponseBeforeOmitRequestBodies
+	}
 	return registration{
-		SchemaVersion: pluginabi.SchemaVersion,
+		SchemaVersion: schemaVersion,
 		Metadata: pluginapi.Metadata{
 			Name:             pluginDisplayName,
 			Version:          a.version,
@@ -186,7 +199,8 @@ func (a *App) Registration() registration {
 			ConfigFields:     a.configFields(),
 		},
 		Capabilities: registrationCapabilities{
-			ResponseBeforeTranslator: true,
+			ResponseBeforeTranslator:                  true,
+			ResponseBeforeTranslatorOmitRequestBodies: omitRequestBodies,
 
 			ModelProvider: true,
 			AuthProvider:  true,

@@ -15,7 +15,10 @@ func TestRegisterReturnsFullContract(t *testing.T) {
 	installFakeHost(t)
 	cfg := setupTestPlugin(t)
 
-	result := callMethod(t, pluginabi.MethodPluginRegister, app.LifecycleRequest{ConfigYAML: buildConfigYAML(cfg)})
+	result := callMethod(t, pluginabi.MethodPluginRegister, app.LifecycleRequest{
+		ConfigYAML:    buildConfigYAML(cfg),
+		SchemaVersion: pluginabi.SchemaVersion,
+	})
 	var reg app.RegistrationInfo
 	if errUnmarshal := json.Unmarshal(result, &reg); errUnmarshal != nil {
 		t.Fatalf("decode registration: %v", errUnmarshal)
@@ -28,6 +31,9 @@ func TestRegisterReturnsFullContract(t *testing.T) {
 		t.Fatal("metadata.version must not be empty")
 	}
 	capabilities := reg.Capabilities
+	if !capabilities.ResponseBeforeTranslator || !capabilities.ResponseBeforeTranslatorOmitRequestBodies {
+		t.Fatalf("response normalizer capabilities = %+v, want schema-8 opt-out", capabilities)
+	}
 	if !capabilities.ModelProvider || !capabilities.AuthProvider || !capabilities.Executor ||
 		!capabilities.QuotaProvider || !capabilities.ManagementAPI {
 		t.Fatalf("all five capabilities must be declared: %+v", capabilities)
@@ -51,12 +57,18 @@ func TestReconfigureKeepsBackgroundRunning(t *testing.T) {
 	installFakeHost(t)
 	cfg := setupTestPlugin(t)
 
-	callMethod(t, pluginabi.MethodPluginRegister, app.LifecycleRequest{ConfigYAML: buildConfigYAML(cfg)})
+	callMethod(t, pluginabi.MethodPluginRegister, app.LifecycleRequest{
+		ConfigYAML:    buildConfigYAML(cfg),
+		SchemaVersion: pluginabi.SchemaVersion,
+	})
 	if !testApp.BackgroundRunning() {
 		t.Fatal("background work must start on register")
 	}
 
-	result := callMethod(t, pluginabi.MethodPluginReconfigure, app.LifecycleRequest{ConfigYAML: buildConfigYAML(cfg)})
+	result := callMethod(t, pluginabi.MethodPluginReconfigure, app.LifecycleRequest{
+		ConfigYAML:    buildConfigYAML(cfg),
+		SchemaVersion: pluginabi.SchemaVersion,
+	})
 	var reg app.RegistrationInfo
 	if errUnmarshal := json.Unmarshal(result, &reg); errUnmarshal != nil {
 		t.Fatalf("decode reconfigure response: %v", errUnmarshal)
@@ -64,8 +76,31 @@ func TestReconfigureKeepsBackgroundRunning(t *testing.T) {
 	if reg.Metadata.Name == "" {
 		t.Fatal("reconfigure must return the full registration shape")
 	}
+	if reg.SchemaVersion != pluginabi.SchemaVersionResponseBeforeOmitRequestBodies || !reg.Capabilities.ResponseBeforeTranslatorOmitRequestBodies {
+		t.Fatal("reconfigure must preserve the negotiated response-before opt-out")
+	}
 	if !testApp.BackgroundRunning() {
 		t.Fatal("reconfigure must not stop the background work")
+	}
+}
+
+func TestRegisterLegacyHostKeepsSchema6AndRequestBodies(t *testing.T) {
+	installFakeHost(t)
+	cfg := setupTestPlugin(t)
+
+	result := callMethod(t, pluginabi.MethodPluginRegister, app.LifecycleRequest{
+		ConfigYAML:    buildConfigYAML(cfg),
+		SchemaVersion: pluginabi.SchemaVersionRequestInterceptorOmitBody,
+	})
+	var reg app.RegistrationInfo
+	if errUnmarshal := json.Unmarshal(result, &reg); errUnmarshal != nil {
+		t.Fatalf("decode registration: %v", errUnmarshal)
+	}
+	if reg.SchemaVersion != pluginabi.SchemaVersionRawManagementResponse {
+		t.Fatalf("legacy schema_version = %d, want %d", reg.SchemaVersion, pluginabi.SchemaVersionRawManagementResponse)
+	}
+	if reg.Capabilities.ResponseBeforeTranslatorOmitRequestBodies {
+		t.Fatal("legacy host must not receive the response request-body opt-out capability")
 	}
 }
 

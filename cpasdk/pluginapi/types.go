@@ -106,6 +106,10 @@ type Capabilities struct {
 	ResponseTranslator ResponseTranslator
 	// ResponseBeforeTranslator normalizes upstream responses before native translation.
 	ResponseBeforeTranslator ResponseNormalizer
+	// ResponseBeforeTranslatorOmitRequestBodies opts out of OriginalRequest and
+	// TranslatedRequest for the before-translator normalizer on schema version 8+.
+	// Body and all metadata are still provided. Other hooks are unaffected.
+	ResponseBeforeTranslatorOmitRequestBodies bool
 	// ResponseAfterTranslator normalizes translated responses before delivery.
 	ResponseAfterTranslator ResponseNormalizer
 	// RequestInterceptor rewrites execution requests before and after credential selection.

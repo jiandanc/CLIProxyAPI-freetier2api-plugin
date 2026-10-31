@@ -46,8 +46,9 @@ type App struct {
 
 	machineSalt string
 
-	lifecycleMu sync.Mutex
-	registered  bool
+	lifecycleMu       sync.Mutex
+	registered        bool
+	hostSchemaVersion atomic.Uint32
 
 	credentialMu    sync.Mutex
 	credentialCache map[string]credentialCacheEntry
