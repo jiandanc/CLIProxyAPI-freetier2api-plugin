@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -59,13 +60,19 @@ func TestUGActionsAreBatchable(t *testing.T) {
 			}
 		}
 	}
-	// 预算必须严格大于「端点个数 × 单请求超时」，否则第一个端点一旦卡满，
-	// 后面的端点剩下的预算连握手都不够。单请求超时读 perRequestTimeout，
-	// 不在这里另写一个字面量——否则改了 postJSON 的超时，这条断言还在按旧
-	// 数字验收。加端点忘调 ugRoundTimeout 时这里失败。
-	if budget := time.Duration(len(actions)) * perRequestTimeout; ugRoundTimeout <= budget {
-		t.Fatalf("ugRoundTimeout = %v，必须大于 端点数×%v = %v",
-			ugRoundTimeout, perRequestTimeout, budget)
+	// 预算必须严格大于最坏耗时：固定端点各 perRequestTimeout，动态入口
+	// （活动表 1 次 + 裂变 status/grant 2 次）各 ugDynamicTimeout，再加一次
+	// 活动触发的预留 ugClaimReserve（触发条数不写死，靠 ugHasBudget 截断，
+	// 所以「最坏耗时」= 预算本身，恒不超过 ugRoundTimeout）。
+	fixedWorst := time.Duration(len(actions)) * perRequestTimeout
+	dynamicWorst := time.Duration(1+2)*ugDynamicTimeout + ugClaimReserve
+	if worst := fixedWorst + dynamicWorst; ugRoundTimeout <= worst {
+		t.Fatalf("ugRoundTimeout = %v，必须大于最坏耗时 %v（固定 %v + 动态 %v）",
+			ugRoundTimeout, worst, fixedWorst, dynamicWorst)
+	}
+	if ugClaimReserve <= ugDynamicTimeout {
+		t.Fatalf("ugClaimReserve = %v，必须大于一次动态端点超时 %v，否则会反复起必然超时的请求",
+			ugClaimReserve, ugDynamicTimeout)
 	}
 	seen := map[string]bool{}
 	for _, action := range actions {
@@ -122,6 +129,9 @@ func TestClaimUGClassifiesEachEndpoint(t *testing.T) {
 		replies := round.replies
 		stubHost(t)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ugNeutralEndpoint(w, r) {
+				return
+			}
 			if r.Method != http.MethodPost {
 				t.Errorf("%s: method = %s, 期望 POST", r.URL.Path, r.Method)
 			}
@@ -214,6 +224,9 @@ func TestClaimUGTreatsNonJSONAsFailure(t *testing.T) {
 	for _, body := range []string{"<html>502 Bad Gateway</html>", "", `{"data":{}}`} {
 		stubHost(t)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ugNeutralEndpoint(w, r) {
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(body))
 		}))
@@ -273,6 +286,22 @@ func TestSummarizeUGCounts(t *testing.T) {
 	}
 	if got := SummarizeUG(nil); got != "没有可领取的活动入口" {
 		t.Errorf("空结果文案 = %q", got)
+	}
+}
+
+// 暂不可领的活动每轮都一样，只列名字，不逐条铺明细。
+func TestSummarizeUGKeepsUnavailableCompact(t *testing.T) {
+	text := SummarizeUG([]UGResult{
+		{Key: "a", Label: "竞赛奖励", Status: UGUnavailable, Message: "活动暂不可用"},
+		{Key: "b", Label: "作品抽奖", Status: UGUnavailable, Message: "活动暂不可用"},
+	})
+	for _, want := range []string{"暂不可领 2 项", "（竞赛奖励、作品抽奖）"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("汇总文案缺少 %q：%s", want, text)
+		}
+	}
+	if strings.Contains(text, "活动暂不可用") {
+		t.Errorf("暂不可领的明细不该铺进汇总：%s", text)
 	}
 }
 
@@ -376,6 +405,9 @@ func TestClaimUGReadsNoCodeState(t *testing.T) {
 	for _, item := range cases {
 		stubHost(t)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ugNeutralEndpoint(w, r) {
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(item.body))
 		}))
@@ -406,6 +438,9 @@ func TestClaimUGReadsNoCodeState(t *testing.T) {
 func TestClaimUGClassifiesMissingParamOnNon200(t *testing.T) {
 	stubHost(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ugNeutralEndpoint(w, r) {
+			return
+		}
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"code":9080,"message":"param is invalid"}`))
 	}))
@@ -444,6 +479,9 @@ func TestClaimUGKeepsServerErrorsAsFailure(t *testing.T) {
 	for _, item := range cases {
 		stubHost(t)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ugNeutralEndpoint(w, r) {
+				return
+			}
 			w.WriteHeader(item.status)
 			_, _ = w.Write([]byte(item.body))
 		}))
@@ -473,6 +511,9 @@ func TestClaimUGKeepsServerErrorsAsFailure(t *testing.T) {
 func TestClaimUGClassifiesAlreadyOnNon200(t *testing.T) {
 	stubHost(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ugNeutralEndpoint(w, r) {
+			return
+		}
 		w.WriteHeader(http.StatusConflict)
 		_, _ = w.Write([]byte(`{"code":1001,"message":"该奖励已领取"}`))
 	}))
@@ -553,5 +594,324 @@ func TestTaskSpecsDeclareUGForCNOnly(t *testing.T) {
 
 	if global := (&adapter{config: ConfigFor(RegionGlobal)}).TaskSpecs(); global != nil {
 		t.Errorf("国际版任务族 = %v, 期望 nil（国际版没有这套活动）", global)
+	}
+}
+
+// ugNeutralEndpoint 让「只看固定端点」的用例不受动态入口干扰。
+//
+// ClaimUG 现在还会读活动表（activity/info）并探测裂变期（code_fission/
+// share_status）。这两个入口有各自的用例；这里给它们一份「空表 + 这期不存在」
+// 的默认回复，避免同一份 body 同时喂给三个端点、把断言搅成说不清哪条路径失败。
+func ugNeutralEndpoint(w http.ResponseWriter, r *http.Request) bool {
+	switch r.URL.Path {
+	case EpUGActivityInfo:
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"commercial_activities":[]}`))
+		return true
+	case EpCodeFissionShareStatus:
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"code":9090,"message":"活动暂不可用"}`))
+		return true
+	}
+	return false
+}
+
+// ugCallLog 记录假上游收到的路径。handler 跑在独立 goroutine 里，加锁是必需的。
+type ugCallLog struct {
+	mu    sync.Mutex
+	paths []string
+}
+
+func (l *ugCallLog) add(path string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.paths = append(l.paths, path)
+}
+
+func (l *ugCallLog) count(path string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n := 0
+	for _, p := range l.paths {
+		if p == path {
+			n++
+		}
+	}
+	return n
+}
+
+// ugStub 造一个假上游：routes 里有的路径回给定 body，其余走中性回复。
+func ugStub(routes map[string]string, log *ugCallLog) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if log != nil {
+			log.add(r.URL.Path)
+		}
+		if body, ok := routes[r.URL.Path]; ok {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		if ugNeutralEndpoint(w, r) {
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok"}`))
+	}
+}
+
+// ugResultByKey 按 key 索引结果，key 重复直接判失败。
+func ugResultByKey(t *testing.T, results []UGResult) map[string]UGResult {
+	t.Helper()
+	byKey := make(map[string]UGResult, len(results))
+	for _, result := range results {
+		if _, dup := byKey[result.Key]; dup {
+			t.Fatalf("结果 key 重复：%s", result.Key)
+		}
+		byKey[result.Key] = result
+	}
+	return byKey
+}
+
+// 活动表的五条覆盖了真实响应的全部形态：已发放、可领、自动发放、签到、已结束。
+const ugActivityTableFixture = `{"commercial_activities":[
+	{"activity_id":"new_user_202609","activity_type":102,"enabled":true,"work_extra":{"granted":true,"grantable":false}},
+	{"activity_id":"checkin_202610","activity_type":104,"enabled":true,"work_extra":{"granted":false,"grantable":true}},
+	{"activity_id":"send_msg_202610","activity_type":105,"enabled":true,"work_extra":{"auto_grant":true,"granted":false,"grantable":false}},
+	{"activity_id":"student_202610","activity_type":107,"enabled":true,"work_extra":{"granted":false,"grantable":true,"general_credits":500}},
+	{"activity_id":"ended_202608","activity_type":103,"enabled":true,"end_time_ms":1700000000000,"work_extra":{"granted":false,"grantable":true}}
+]}`
+
+// 实测 student_auth_reward 在 activity/info 里 grantable=true，但 action 只回
+// 200 `{}`、复查 granted 仍是 false —— 上游要的是先完成学籍认证。这类「要用户
+// 自己去认证 / 装桌面端 / 发消息」的活动一律不打 action，也不当成福利推出来。
+func TestClaimUGSkipsActivitiesNeedingManualAction(t *testing.T) {
+	stubHost(t)
+	log := &ugCallLog{}
+	server := httptest.NewServer(ugStub(map[string]string{
+		EpUGActivityInfo:   ugActivityTableFixture,
+		EpUGActivityAction: `{"code":0,"message":"发放成功"}`,
+	}, log))
+	defer server.Close()
+
+	results, err := ClaimUG(context.Background(), ugTestCredential(), ugTestConfig(t, server.URL))
+	if err != nil {
+		t.Fatalf("ClaimUG 出错：%v", err)
+	}
+	if got := log.count(EpUGActivityAction); got != 0 {
+		t.Fatalf("activity/action 调了 %d 次，want 0（学生认证/发消息都要用户自己动手，插件不该打）", got)
+	}
+	byKey := ugResultByKey(t, results)
+	for _, key := range []string{"activity:student_202610", "activity:send_msg_202610"} {
+		if _, ok := byKey[key]; ok {
+			t.Fatalf("%s 需要用户自己动手，不该出现在结果里", key)
+		}
+	}
+	if r, ok := byKey["activity:new_user_202609"]; !ok || r.Status != UGAlready {
+		t.Fatalf("已发放的新人活动应报已领取：%+v", r)
+	}
+	if r, ok := byKey["activity:checkin_202610"]; !ok || !strings.Contains(r.Message, "签到") {
+		t.Fatalf("签到类活动应指向每日签到：%+v", r)
+	}
+	if _, ok := byKey["activity:ended_202608"]; ok {
+		t.Fatal("已结束的活动不该出现在结果里")
+	}
+}
+
+// 一键能领的必须领干净：不按固定条数截断，一轮里有几条可领就领几条。
+func TestClaimUGClaimsEveryClaimableActivity(t *testing.T) {
+	stubHost(t)
+	log := &ugCallLog{}
+	server := httptest.NewServer(ugStub(map[string]string{
+		EpUGActivityInfo:   ugClaimableTableFixture,
+		EpUGActivityAction: `{"code":0,"message":"发放成功"}`,
+	}, log))
+	defer server.Close()
+
+	results, err := ClaimUG(context.Background(), ugTestCredential(), ugTestConfig(t, server.URL))
+	if err != nil {
+		t.Fatalf("ClaimUG 出错：%v", err)
+	}
+	if got := log.count(EpUGActivityAction); got != 3 {
+		t.Fatalf("activity/action 调了 %d 次，want 3（三条都可一键领）", got)
+	}
+	claimed := 0
+	for _, result := range results {
+		// 固定端点那两条也算领到，这里只看活动表驱动的三条。
+		if result.Status == UGClaimed && strings.HasPrefix(result.Key, "activity:") {
+			claimed++
+		}
+	}
+	if claimed != 3 {
+		t.Fatalf("活动领到 %d 项，want 3：%+v", claimed, results)
+	}
+}
+
+const ugClaimableTableFixture = `{"commercial_activities":[
+	{"activity_id":"promo_a","activity_type":101,"enabled":true,"work_extra":{"granted":false,"grantable":true,"general_credits":100}},
+	{"activity_id":"promo_b","activity_type":101,"enabled":true,"work_extra":{"granted":false,"grantable":true,"general_credits":200}},
+	{"activity_id":"promo_c","activity_type":101,"enabled":true,"work_extra":{"granted":false,"grantable":true,"work_credits":300}}
+]}`
+
+func TestClaimUGActivityActionNeedsPrereq(t *testing.T) {
+	stubHost(t)
+	server := httptest.NewServer(ugStub(map[string]string{
+		EpUGActivityInfo:   ugClaimableTableFixture,
+		EpUGActivityAction: `{}`,
+	}, nil))
+	defer server.Close()
+
+	results, err := ClaimUG(context.Background(), ugTestCredential(), ugTestConfig(t, server.URL))
+	if err != nil {
+		t.Fatalf("ClaimUG 出错：%v", err)
+	}
+	result := ugResultByKey(t, results)["activity:promo_a"]
+	if result.Status != UGNeedsPrereq {
+		t.Fatalf("200 空对象应判为需先完成前置条件，得到 %v：%s", result.Status, result.Message)
+	}
+	if strings.TrimSpace(result.Message) == "" {
+		t.Fatal("需前置的结果必须给出说明，不能是空文案")
+	}
+}
+
+func TestClaimUGActivityInfoFailureKeepsFixedResults(t *testing.T) {
+	stubHost(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == EpUGActivityInfo {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"code":500,"message":"内部错误"}`))
+			return
+		}
+		if r.URL.Path == EpCodeFissionShareStatus {
+			// 这期没有裂变活动：结果里只该剩固定端点那两条。
+			_, _ = w.Write([]byte(`{"code":9090,"message":"活动暂不可用"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok"}`))
+	}))
+	defer server.Close()
+
+	results, err := ClaimUG(context.Background(), ugTestCredential(), ugTestConfig(t, server.URL))
+	if err != nil {
+		t.Fatalf("活动表故障不该让整轮失败：%v", err)
+	}
+	if len(results) != len(UGActions()) {
+		t.Fatalf("活动表故障时应只剩固定端点结果，得到 %d 条：%+v", len(results), results)
+	}
+}
+
+func TestClaimUGFissionReportsInvitees(t *testing.T) {
+	stubHost(t)
+	log := &ugCallLog{}
+	server := httptest.NewServer(ugStub(map[string]string{
+		EpCodeFissionShareStatus: `{"code":0,"invitees":[{"invitee_name":"a","inviter_reward_credits":100,"status":2}]}`,
+	}, log))
+	defer server.Close()
+
+	results, err := ClaimUG(context.Background(), ugTestCredential(), ugTestConfig(t, server.URL))
+	if err != nil {
+		t.Fatalf("ClaimUG 出错：%v", err)
+	}
+	result := ugResultByKey(t, results)["fission:"+fissionActivityCandidates[0]]
+	if result.Status != UGAlready || !strings.Contains(result.Message, "累计 100 积分") {
+		t.Fatalf("裂变进度不对：%v / %s", result.Status, result.Message)
+	}
+	if got := log.count(EpCodeFissionGrant); got != 0 {
+		t.Fatalf("没有待发放的邀请时不该调 grant，实际 %d 次", got)
+	}
+}
+
+func TestClaimUGFissionGrantsPendingInvitee(t *testing.T) {
+	stubHost(t)
+	log := &ugCallLog{}
+	server := httptest.NewServer(ugStub(map[string]string{
+		EpCodeFissionShareStatus: `{"code":0,"invitees":[{"invitee_name":"a","inviter_reward_credits":100,"status":1}]}`,
+		EpCodeFissionGrant:       `{"code":0,"message":"发放成功"}`,
+	}, log))
+	defer server.Close()
+
+	results, err := ClaimUG(context.Background(), ugTestCredential(), ugTestConfig(t, server.URL))
+	if err != nil {
+		t.Fatalf("ClaimUG 出错：%v", err)
+	}
+	byKey := ugResultByKey(t, results)
+	if r := byKey["fission:"+fissionActivityCandidates[0]]; r.Status != UGUnavailable || !strings.Contains(r.Message, "待发放") {
+		t.Fatalf("有待发放邀请时进度应如实说明：%v / %s", r.Status, r.Message)
+	}
+	if got := log.count(EpCodeFissionGrant); got != 1 {
+		t.Fatalf("有待发放邀请时应调 grant 一次，实际 %d 次", got)
+	}
+	if r := byKey["fission-grant:"+fissionActivityCandidates[0]]; r.Status != UGClaimed {
+		t.Fatalf("grant 成功应记为已领取：%+v", r)
+	}
+}
+
+func TestClaimUGFissionShowsInviteCodeWhenNoInvitees(t *testing.T) {
+	stubHost(t)
+	server := httptest.NewServer(ugStub(map[string]string{
+		EpCodeFissionShareStatus: `{"code":0,"invitees":[]}`,
+		EpCodeFissionShareLink:   `{"code":0,"invite_code":"ABC123","share_url":"https://example.invalid/s/abc"}`,
+	}, nil))
+	defer server.Close()
+
+	results, err := ClaimUG(context.Background(), ugTestCredential(), ugTestConfig(t, server.URL))
+	if err != nil {
+		t.Fatalf("ClaimUG 出错：%v", err)
+	}
+	result := ugResultByKey(t, results)["fission:"+fissionActivityCandidates[0]]
+	if !strings.Contains(result.Message, "ABC123") {
+		t.Fatalf("还没有被邀请人时应把邀请码带出来：%q", result.Message)
+	}
+}
+
+func TestClaimUGFissionIgnoresReplyWithoutBusinessCode(t *testing.T) {
+	stubHost(t)
+	// 200 + `{"data":{}}`：网关兜页、被中间层改写都长这样。缺 code 不能当
+	// 「这一期存在」，否则会把一张空壳报成活动进行中。
+	server := httptest.NewServer(ugStub(map[string]string{
+		EpCodeFissionShareStatus: `{"data":{}}`,
+	}, nil))
+	defer server.Close()
+
+	results, err := ClaimUG(context.Background(), ugTestCredential(), ugTestConfig(t, server.URL))
+	if err != nil {
+		t.Fatalf("ClaimUG 出错：%v", err)
+	}
+	if _, ok := ugResultByKey(t, results)["fission:"+fissionActivityCandidates[0]]; ok {
+		t.Fatal("没有业务码的响应不该被当成裂变期")
+	}
+}
+
+func TestClaimUGFissionCredentialFailureStops(t *testing.T) {
+	stubHost(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == EpCodeFissionShareStatus {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":401,"message":"登录已过期"}`))
+			return
+		}
+		if ugNeutralEndpoint(w, r) {
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"code":0,"message":"ok"}`))
+	}))
+	defer server.Close()
+
+	if _, err := ClaimUG(context.Background(), ugTestCredential(), ugTestConfig(t, server.URL)); err == nil {
+		t.Fatal("凭证失效应让整轮报错，而不是静默跳过裂变")
+	}
+}
+
+func TestSummarizeUGCountsPrereqAsPending(t *testing.T) {
+	summary := SummarizeUG([]UGResult{
+		{Key: "claim_package", Label: "每日 200 积分", Status: UGClaimed, Message: "领到 200 积分"},
+		{Key: "activity:student_202610", Label: "学生认证 500 积分", Status: UGNeedsPrereq, Message: "需先完成学生认证"},
+	})
+	if !strings.Contains(summary, "待满足前置 1 项") {
+		t.Fatalf("需前置的活动应单列计数：%s", summary)
+	}
+	if !strings.Contains(summary, "失败 0 项") {
+		t.Fatalf("需前置不该计入失败：%s", summary)
 	}
 }
